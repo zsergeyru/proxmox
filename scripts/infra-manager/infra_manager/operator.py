@@ -605,19 +605,35 @@ def _operator_guest_task(
     )
 
 
-def operator_nas_smb_password_set(name: str, payload: str) -> int:
-    """Accept an ephemeral secret only from the trusted PVE stdin channel."""
-    if name != "nas" or len(payload) > 1024 or not payload.endswith("\n"):
-        raise InfraManagerError("Недопустимое имя NAS или ввод пароля Samba")
+def operator_physical_credential_plan(name: str) -> int:
+    """Return only generic prompt descriptions to a trusted PVE terminal."""
+    from .physical_host_credentials import credential_plan
+    from .physical_hosts import load_physical_host
+
+    load_physical_host(PATHS.repo_root, name)
+    value = credential_plan(PATHS.repo_root, name)
+    print("PHYSICAL_CREDENTIAL_PLAN_JSON=" + json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"),
+    ))
+    return 0
+
+
+def operator_physical_credential_set(name: str, payload: str) -> int:
+    """Store an explicitly declared secret without knowing its service."""
+    from .physical_host_credentials import save_operator_secret
+    from .physical_hosts import load_physical_host
+
+    load_physical_host(PATHS.repo_root, name)
+    if not payload.endswith("\n") or len(payload) > 2048:
+        raise InfraManagerError("Некорректный защищённый ввод")
     try:
         value = json.loads(payload)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise InfraManagerError("Повреждён закрытый ввод пароля Samba") from exc
-    if not isinstance(value, dict) or set(value) != {"password"}:
-        raise InfraManagerError("Неверная форма ввода пароля Samba")
-    from .physical_nas_users import store_nas_smb_secret
-    store_nas_smb_secret(value["password"])
-    console.ok("Пароль Samba сохранён в защищённом состоянии 910")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise InfraManagerError("Повреждён ввод операторских данных") from exc
+    if not isinstance(value, dict) or set(value) != {"id", "password"}:
+        raise InfraManagerError("Некорректные поля операторских данных")
+    save_operator_secret(PATHS.repo_root, name, value["id"], value["password"])
+    console.ok("Операторский секрет сохранён в защищённом состоянии")
     return 0
 
 
@@ -796,8 +812,9 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
     bootstrap.add_argument("name")
-    smb_set = subparsers.add_parser("smb-password-set", help=argparse.SUPPRESS)
-    smb_set.add_argument("name")
+    for command in ("credential-plan", "credential-set"):
+        credential = subparsers.add_parser(command, help=argparse.SUPPRESS)
+        credential.add_argument("name")
     for command in ("ssh-trust-plan", "ssh-trust-confirm"):
         trust = subparsers.add_parser(command, help=argparse.SUPPRESS)
         trust.add_argument("name")
@@ -864,13 +881,15 @@ def main(argv: list[str] | None = None) -> int:
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
             return operator_physical_task("hosts", "all")
-        if args.command == "smb-password-set":
-            if not show_secrets or args.name != "nas":
-                raise InfraManagerError("Смена пароля SMB доступна только из доверенного PVE")
-            payload = sys.stdin.readline(1025)
-            if not payload or len(payload) > 1024:
-                raise InfraManagerError("Не получен закрытый ввод пароля Samba")
-            return operator_nas_smb_password_set(args.name, payload)
+        if args.command in {"credential-plan", "credential-set"}:
+            if not show_secrets:
+                raise InfraManagerError("Операторские секреты доступны только из доверенного PVE")
+            if args.command == "credential-plan":
+                return operator_physical_credential_plan(args.name)
+            payload = sys.stdin.readline(2049)
+            if not payload or len(payload) > 2048:
+                raise InfraManagerError("Не получен закрытый ввод")
+            return operator_physical_credential_set(args.name, payload)
         if args.command in {"bootstrap", "bootstrap-state"}:
             if not show_secrets:
                 raise InfraManagerError("Начальное доверие доступно только из терминала PVE")
