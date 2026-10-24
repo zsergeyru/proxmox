@@ -2,7 +2,7 @@ $schema: https://json-schema.org/draft/2020-12/schema
 title: Physical NAS backup policy
 type: object
 additionalProperties: false
-required: [schema_version, host, engine, server, local_client, retention, migration]
+required: [schema_version, host, engine, server, local_client, retention]
 properties:
   schema_version: {const: 1}
   host: {const: nas}
