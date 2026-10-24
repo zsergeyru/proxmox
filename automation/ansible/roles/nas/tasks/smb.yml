@@ -9,6 +9,20 @@
       - nas_shared_uuid | length > 4
     fail_msg: Нет подтверждённых ссылок на файловые системы OMV
 
+- name: Подтвердить гостевую политику SMB
+  ansible.builtin.assert:
+    that:
+      - nas_access_policy.schema_version == 2
+      - nas_access_policy.mode == 'guest_only'
+      - nas_access_policy.shares.keys() | list | sort == nas_provision.shares | map(attribute='name') | list | sort
+      - nas_access_policy.shares.values() | map(attribute='access') | unique | list == ['read_write']
+    fail_msg: Нужны явные разрешения гостю на чтение и запись всех SMB-папок
+
+- name: Проверить учётную запись Samba guest
+  ansible.builtin.command:
+    argv: [id, -u, nobody]
+  changed_when: false
+
 - name: Повторно проверить подключение общего HDD по UUID
   ansible.builtin.command:
     argv: [findmnt, --mountpoint, "{{ nas_shared_mount }}", --source, "UUID={{ nas_shared_uuid }}"]
@@ -28,6 +42,20 @@
     mode: "0770"
   loop: "{{ nas_provision.shares }}"
 
+# Nobody is the system identity of an anonymous Samba connection. Grant
+# POSIX permissions on declared share roots only, never on the backup pool.
+# Inherited ACL applies to new children; existing nested ACLs are preserved.
+- name: Разрешить гостю чтение и запись объявленных SMB-каталогов
+  ansible.builtin.command:
+    argv:
+      - setfacl
+      - -m
+      - u:nobody:rwx,d:u:nobody:rwx
+      - --
+      - "{{ (nas_shared_mount if item.volume == 'shared' else nas_data_mountpoint) ~ '/' ~ item.directory }}"
+  loop: "{{ nas_provision.shares }}"
+  changed_when: false
+
 - name: Установить штатный обработчик базы OMV
   ansible.builtin.copy:
     src: nas-omv-shares.py
@@ -42,6 +70,8 @@
       - /usr/local/sbin/nas-omv-shares
       - --shares-json
       - "{{ nas_provision.shares | to_json }}"
+      - --access-json
+      - "{{ {'mode': nas_access_policy.mode, 'shares': nas_access_policy.shares} | to_json }}"
       - --shared-ref
       - "{{ nas_shared_ref }}"
       - --data-ref
@@ -51,7 +81,7 @@
       - --data-mount
       - "{{ nas_data_mountpoint }}"
   register: nas_smb_register
-  changed_when: "'Созданы новые записи' in nas_smb_register.stdout"
+  changed_when: "'SMB_CHANGED:' in nas_smb_register.stdout"
 
 # OMV владеет smb.conf через omv-salt. Непосредственно гарантируем лишь
 # состояние службы: на новой установке smbd может оставаться остановленным.
