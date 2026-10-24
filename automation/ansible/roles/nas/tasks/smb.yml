@@ -15,7 +15,7 @@
       - nas_access_policy.schema_version == 3
       - nas_access_policy.mode == 'named_users'
       - nas_access_policy.credential.source == 'controller_file'
-      - nas_access_policy.credential.path == '/mnt/persistent-state/physical-hosts/nas-smb-password'
+      - nas_access_policy.credential.path == '/var/lib/infra-manager/physical-hosts/nas-smb-password'
       - nas_access_policy.users | length > 0
       - nas_access_policy.shares.keys() | list | sort == nas_provision.shares | map(attribute='name') | list | sort
       - nas_access_policy.shares.values() | map(attribute='access') | unique | list == ['read_write']
