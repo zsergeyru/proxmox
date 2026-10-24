@@ -140,7 +140,7 @@ def test_live_guard_is_read_only():
 def test_scripts_have_no_destructive_fallback():
     for file in ("nas-urbackup-safe.py", "nas-urbackup-snapshot.py",
                  "nas-urbackup-recovery.py"):
-        text = (ROOT / "automation/ansible/files" / file).read_text(encoding="utf-8")
+        text = (ROOT / "automation/ansible/roles/nas/files" / file).read_text(encoding="utf-8")
         for unsafe in ("mkfs", "wipefs", "zpool create", "zpool destroy", "zfs rollback",
                        "docker volume prune"):
             assert unsafe not in text, (file, unsafe)
