@@ -71,6 +71,7 @@ def main() -> int:
         snapshot = ds + "@" + name
         mounted = False
         created = False
+        configured = False
         try:
             run("zfs", "snapshot", snapshot)
             created = True
@@ -86,10 +87,13 @@ def main() -> int:
             run("mount", "-o", "remount,bind,ro", str(STAGING))
             if not os.path.ismount(str(STAGING)):
                 raise SnapshotError("Нельзя подтвердить bind-mount согласованного снимка")
-            # Установщик клиента должен заранее объявить этот путь как backupdir.
-            paths = run(CLIENT, "list-backupdirs")
-            if str(STAGING) not in paths:
-                raise SnapshotError("UrBackup Client не настроен читать подготовленный снимок")
+            # Директория клиента существует ТОЛЬКО во время жизни снимка.
+            # В остальное время нет пути, из которого UrBackup мог бы
+            # автоматически сохранить пустой каталог вместо файлов NAS.
+            run(CLIENT, "add-backupdir", "-n", "nas-data", "-d", str(STAGING))
+            configured = True
+            if str(STAGING) not in run(CLIENT, "list-backupdirs"):
+                raise SnapshotError("Клиент не подтвердил включение пути ZFS snapshot")
             run(CLIENT, "start", "-f", timeout=21600)
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
@@ -99,6 +103,9 @@ def main() -> int:
                 time.sleep(5)
             raise SnapshotError("UrBackup не подтвердил новую точку восстановления")
         finally:
+            if configured:
+                # Если клиент занят, не уничтожать снимок вслепую.
+                run(CLIENT, "remove-backupdir", "-n", "nas-data")
             if mounted:
                 # Никогда не удалять снимок, пока его читает резервная задача.
                 # При проблеме unmount (busy) оставляем снимок и сообщаем об ошибке.
