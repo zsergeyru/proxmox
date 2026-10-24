@@ -53,6 +53,15 @@
         argv: [/usr/local/sbin/nas-urbackup-client-mount, prepare]
       changed_when: false
 
+    - name: Установить только локальные настройки backend UrBackup
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup-client.defaults.j2
+        dest: /etc/nas-apps/urbackup/client-defaults
+        owner: root
+        group: root
+        mode: "0600"
+      register: nas_urbackup_client_defaults
+
     - name: Записать Compose постоянного клиента в отдельном проекте
       ansible.builtin.template:
         src: ../templates/nas-urbackup-client.compose.yml.j2
@@ -110,7 +119,7 @@
         name: nas-urbackup-client.service
         enabled: true
         daemon_reload: true
-        state: "{{ 'restarted' if (nas_urbackup_client_compose.changed or nas_urbackup_client_unit.changed) else 'started' }}"
+        state: "{{ 'restarted' if (nas_urbackup_client_compose.changed or nas_urbackup_client_unit.changed or nas_urbackup_client_defaults.changed) else 'started' }}"
 
     - name: Подтвердить доступность backend UrBackup в Docker
       ansible.builtin.command:
