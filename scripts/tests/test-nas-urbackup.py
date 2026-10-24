@@ -184,6 +184,8 @@ def test_docker_and_deploy_contract():
     compose = (folder / "templates/nas-urbackup.compose.yml.j2").read_text()
     assert "create_host_path: false" in compose
     assert '127.0.0.1:55414' in compose
+    assert '127.0.0.1:55413:55413/tcp' in compose
+    assert '"55413:55413/tcp"' not in compose
     assert 'restart: "no"' in compose
     assert "/var/urbackup" in compose
     unit = (folder / "templates/nas-urbackup.service.j2").read_text()
@@ -195,6 +197,12 @@ def test_docker_and_deploy_contract():
     assert "configure_nas_urbackup_local" in operations
     assert "configure_nas_backups(" not in operations
     assert "load_nas_backup_policy" in operations
+    playbook = (folder / "playbooks/configure-nas-urbackup.yml").read_text()
+    assert 'group: nas-urbackup' in playbook
+    assert 'mode: "0710"' in playbook
+    safe = (folder / "files/nas-urbackup-safe.py").read_text()
+    assert "if PASSWORD.exists():" in safe
+    assert "O_EXCL" in safe
     for name in ("configure-nas-urbackup.yml", "configure-nas-urbackup-client.yml"):
         assert isinstance(yaml.safe_load((folder / "playbooks" / name).read_text()), list)
 
