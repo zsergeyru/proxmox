@@ -18,7 +18,7 @@ properties:
   deployment:
     type: object
     additionalProperties: false
-    required: [phases, components]
+    required: [phases, components, dependencies]
     properties:
       phases:
         const: [base, services]
@@ -28,6 +28,15 @@ properties:
         uniqueItems: true
         items:
           enum: [urbackup_server, urbackup_client, apps, smb]
+      dependencies:
+        type: object
+        additionalProperties: false
+        properties:
+          urbackup_server: {$ref: '#/$defs/dependency_list'}
+          urbackup_client: {$ref: '#/$defs/dependency_list'}
+          apps: {$ref: '#/$defs/dependency_list'}
+          smb: {$ref: '#/$defs/dependency_list'}
+        required: [urbackup_client]
   services:
     type: object
     minProperties: 1
@@ -72,6 +81,11 @@ properties:
         volume: {enum: [shared, data]}
         directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
 $defs:
+  dependency_list:
+    type: array
+    uniqueItems: true
+    maxItems: 3
+    items: {enum: [urbackup_server, urbackup_client, apps, smb]}
   operator:
     type: object
     additionalProperties: false
