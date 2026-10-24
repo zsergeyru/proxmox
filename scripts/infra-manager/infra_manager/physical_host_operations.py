@@ -248,20 +248,8 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
                 shared = next(volume for volume in verified if volume.role == "shared")
                 shared_uuid = host.volumes["shared"]["filesystem_uuid"]
-                configure_nas_apps(
-                    repo_root, session,
-                    shared_mount=shared.mountpoint, shared_uuid=shared_uuid,
-                )
                 data = next(volume for volume in verified if volume.role == "data")
                 backup = next(volume for volume in verified if volume.role == "backup")
-                configure_nas_smb(
-                    repo_root, session,
-                    shared_mount=shared.mountpoint,
-                    shared_uuid=shared_uuid,
-                    shared_ref=host.volumes["shared"]["omv_reference"],
-                    data_mountpoint=data.mountpoint,
-                    data_ref=host.volumes["data"]["omv_reference"],
-                )
                 policy = load_nas_backup_policy(repo_root)
                 verify_nas_backup_volumes(policy, verified)
                 configure_nas_urbackup(
@@ -277,6 +265,18 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     data_mountpoint=data.mountpoint,
                     backup_mountpoint=backup.mountpoint,
                     policy=policy,
+                )
+                configure_nas_apps(
+                    repo_root, session,
+                    shared_mount=shared.mountpoint, shared_uuid=shared_uuid,
+                )
+                configure_nas_smb(
+                    repo_root, session,
+                    shared_mount=shared.mountpoint,
+                    shared_uuid=shared_uuid,
+                    shared_ref=host.volumes["shared"]["omv_reference"],
+                    data_mountpoint=data.mountpoint,
+                    data_ref=host.volumes["data"]["omv_reference"],
                 )
                 verify_nas_services(session, disks=disks, volumes=verified)
                 console.result(
