@@ -18,7 +18,6 @@ COMPOSE = Path("/etc/nas-apps/urbackup/compose.yml")
 ROOT = Path("/var/lib/nas-apps/urbackup")
 PASSWORD = Path("/etc/nas-apps/urbackup/admin-password")
 INITIALIZED = Path("/etc/nas-apps/urbackup/initialized")
-ALLOWED = ("nas-data", "nas-backup")
 
 
 class SafetyError(Exception):
@@ -41,8 +40,11 @@ def read_config() -> dict:
     if set(raw) != {"source_pool", "source_guid", "source_mount",
                     "backup_pool", "backup_guid", "backup_mount"}:
         raise SafetyError("Неверное описание хранилищ UrBackup")
-    if raw["source_pool"] != "nas-data" or raw["backup_pool"] != "nas-backup":
-        raise SafetyError("Нельзя менять назначение пулов NAS")
+    if (any(not isinstance(raw[role], str) or
+            not re.fullmatch(r"nas-[a-z0-9-]+", raw[role])
+            for role in ("source_pool", "backup_pool"))
+            or raw["source_pool"] == raw["backup_pool"]):
+        raise SafetyError("Подмена или совпадение двух ZFS-пулов NAS")
     if raw["source_guid"] == raw["backup_guid"]:
         raise SafetyError("Источник и резерв должны быть разными физическими пулами")
     for name in ("source_guid", "backup_guid"):
