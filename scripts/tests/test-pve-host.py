@@ -308,12 +308,16 @@ def test_recovery_host_support() -> None:
         manager = root / "scripts/infra-manager/host/manager.py"
         helper = root / "scripts/infra-manager/host/infra_manager_nas_bootstrap.py"
         storage_helper = root / "scripts/infra-manager/host/infra_manager_nas_storage.py"
+        credential_helper = root / "scripts/infra-manager/host/infra_manager_host_credentials.py"
+        flow_helper = root / "scripts/infra-manager/host/infra_manager_host_flow.py"
         python_helper = root / "scripts/infra-manager/host/infra_manager_python_deps.py"
         command.parent.mkdir(parents=True)
         command.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         manager.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         storage_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        credential_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        flow_helper.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
         python_helper.write_text("#!/usr/bin/env python3\\n", encoding="utf-8")
 
         def record_install(
@@ -361,6 +365,16 @@ def test_recovery_host_support() -> None:
         (
             str(storage_helper),
             "/usr/local/sbin/infra_manager_nas_storage.py",
+            "0644",
+        ),
+        (
+            str(credential_helper),
+            "/usr/local/sbin/infra_manager_host_credentials.py",
+            "0644",
+        ),
+        (
+            str(flow_helper),
+            "/usr/local/sbin/infra_manager_host_flow.py",
             "0644",
         ),
         (
