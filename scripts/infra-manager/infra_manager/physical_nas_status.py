@@ -63,6 +63,12 @@ def verify_nas_services(
         else:
             console.ok(f"Том {volume.role}: занято {percentage}%")
 
+    critical = {
+        "docker.service",
+        "nas-urbackup.service",
+        "urbackupclientbackend.service",
+        "nas-urbackup-local.timer",
+    }
     for name in (
         "docker.service",
         "smbd.service",
@@ -70,13 +76,17 @@ def verify_nas_services(
         "nas-urbackup.service",
         "urbackupclientbackend.service",
         "nas-urbackup-local.timer",
+        "nas-urbackup-recovery.timer",
     ):
         result = run(
             session.command("systemctl is-active " + name),
             check=False, capture_output=True,
         )
         if result.returncode or result.stdout.strip() != "active":
-            raise InfraManagerError(f"Служба NAS не запущена: {name}")
+            if name in critical:
+                raise InfraManagerError(f"Служба NAS не запущена: {name}")
+            console.warning(f"Необязательная служба NAS не запущена: {name}")
+            continue
         console.ok(f"Служба {name}: работает")
 
     container = run(
@@ -86,7 +96,7 @@ def verify_nas_services(
         check=False, capture_output=True,
     )
     if container.returncode or container.stdout.strip() != "true":
-        raise InfraManagerError("Контейнер qBittorrent не работает")
+        console.warning("Контейнер qBittorrent не запущен (не влияет на UrBackup)")
 
     server = run(
         session.command("docker inspect --format '{{.State.Running}}' nas-urbackup"),
@@ -107,10 +117,15 @@ def verify_nas_services(
         session.command("systemctl show -p Result --value nas-urbackup-local.service"),
         check=False, capture_output=True,
     )
-    if recent.returncode or recent.stdout.strip() != "success":
+    started = run(
+        session.command("systemctl show -p ExecMainStartTimestamp --value nas-urbackup-local.service"),
+        check=False, capture_output=True,
+    )
+    if (recent.returncode or recent.stdout.strip() != "success" or
+            started.returncode or started.stdout.strip() in ("", "n/a")):
         console.warning("Локальное файловое резервирование NAS ещё не подтверждено")
     else:
-        console.ok("Последнее локальное задание NAS: systemd сообщает успех")
+        console.ok("Локальное задание NAS завершилось успешно (проверка восстановления отдельно)")
     console.warning("История резервных копий UrBackup и пробное восстановление "
                     "не подтверждаются одним только запуском сервера")
 
