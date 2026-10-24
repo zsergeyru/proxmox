@@ -123,6 +123,7 @@ $defs:
       title: {type: string, minLength: 1, maxLength: 100}
       component: {enum: [base, urbackup_server, urbackup_client, apps, smb]}
       image: {type: string, pattern: '^lscr[.]io/linuxserver/qbittorrent:[a-zA-Z0-9_.-]+$'}
+      runtime: {$ref: '#/$defs/qbittorrent_runtime'}
       address: {const: auto_omv}
       url:
         type: string
