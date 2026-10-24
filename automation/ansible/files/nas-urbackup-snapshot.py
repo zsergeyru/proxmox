@@ -68,7 +68,8 @@ def main() -> int:
         if children != [ds]:
             raise SnapshotError("Обнаружены дочерние ZFS datasets: нужна согласованная схема")
         if MOUNT.is_symlink() or (MOUNT.exists() and
-                                  os.path.ismount(str(MOUNT))):
+                                  (not MOUNT.is_dir() or os.path.ismount(str(MOUNT))
+                                   or any(MOUNT.iterdir()))):
             raise SnapshotError("Временная точка ZFS уже занята — проверить прошлое задание")
         old_snapshots = run("zfs", "list", "-H", "-t", "snapshot",
                             "-o", "name", "-r", ds)
