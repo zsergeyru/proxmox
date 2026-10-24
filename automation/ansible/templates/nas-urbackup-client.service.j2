@@ -1,0 +1,19 @@
+[Unit]
+Description=Permanent UrBackup LAN Docker Client on NAS
+Requires=docker.service nas-urbackup.service
+BindsTo=nas-urbackup.service
+After=docker.service nas-urbackup.service
+RequiresMountsFor={{ nas_data_mountpoint }} {{ nas_backup_mountpoint }}
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/sbin/nas-urbackup-safe preflight
+ExecStartPre=/usr/local/sbin/nas-urbackup-client-mount check
+ExecStart=/usr/bin/docker compose -f /etc/nas-apps/urbackup/client-compose.yml up --no-color
+ExecStop=/usr/bin/docker compose -f /etc/nas-apps/urbackup/client-compose.yml down
+Restart=no
+TimeoutStartSec=240
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
