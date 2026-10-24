@@ -666,6 +666,16 @@ jobs:
             -i localhost, \
             -e "guest=$guest_dir" \
             automation/ansible/playbooks/configure-guest.yml
+          # Full Ansible parsing: PyYAML alone missed malformed command arguments.
+          for playbook in configure-nas-urbackup.yml configure-nas-urbackup-client.yml; do
+            docker run --rm \
+              -v "$PWD:/workspace" \
+              -w /workspace \
+              bootstrap-runtime:test \
+              ansible-playbook --syntax-check \
+              -i nas, \
+              "automation/ansible/playbooks/$playbook"
+          done
 
       - name: Verify malformed guest directory is rejected
         run: |

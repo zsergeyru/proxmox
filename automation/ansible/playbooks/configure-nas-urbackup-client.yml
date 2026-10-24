@@ -13,7 +13,8 @@
         fail_msg: Неподтверждённое расписание NAS
 
     - name: Проверить источники до подготовки клиента
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, preflight]
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/nas-urbackup-safe, preflight]
       changed_when: false
 
     - name: Установить проверяемый исполнитель ZFS снимка
@@ -56,7 +57,8 @@
       no_log: true
 
     - name: Подтвердить версию клиента после установки
-      ansible.builtin.command: [/usr/local/bin/urbackupclientctl, --version]
+      ansible.builtin.command:
+        argv: [/usr/local/bin/urbackupclientctl, --version]
       changed_when: false
 
     - name: Проверить и включить Linux-клиент

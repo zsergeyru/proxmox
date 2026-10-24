@@ -204,7 +204,19 @@ def test_docker_and_deploy_contract():
     assert "if PASSWORD.exists():" in safe
     assert "O_EXCL" in safe
     for name in ("configure-nas-urbackup.yml", "configure-nas-urbackup-client.yml"):
-        assert isinstance(yaml.safe_load((folder / "playbooks" / name).read_text()), list)
+        plays = yaml.safe_load((folder / "playbooks" / name).read_text())
+        assert isinstance(plays, list)
+        for play in plays:
+            for task in play.get("tasks", []):
+                args = task.get("ansible.builtin.command")
+                if args is not None:
+                    # YAML принимает список как значение модуля, но Ansible
+                    # выдаёт "unexpected parameter type in action".
+                    assert isinstance(args, (dict, str)), (name, task["name"])
+                    if isinstance(args, dict):
+                        assert isinstance(args.get("argv"), list), (name, task["name"])
+                        assert all(isinstance(item, str) for item in args["argv"])
+
 
 
 def main() -> int:
