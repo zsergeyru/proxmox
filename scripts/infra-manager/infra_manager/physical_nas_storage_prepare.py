@@ -16,7 +16,8 @@ from pathlib import Path
 from .common import InfraManagerError, console, run
 from .physical_hosts import PhysicalHost
 from .physical_host_ssh import PhysicalHostSshSession
-from .physical_nas_ansible import configure_nas
+from .physical_nas_ansible import load_nas_provision, run_nas_phase
+from .physical_nas_backup_policy import load_nas_backup_policy
 from .physical_nas_storage_state import save_storage_identity
 from .physical_nas_system import read_nas_system
 from .physical_nas_volumes import verify_nas_volumes
@@ -239,7 +240,11 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
                 "его сохранность обязательно подтвердит NAS до первой записи"
             )
     console.info("Установка необходимых средств подготовки HDD и OMV")
-    configure_nas(repo_root, session)
+    run_nas_phase(
+        repo_root, session, 'base',
+        provision=load_nas_provision(repo_root),
+        policy=load_nas_backup_policy(repo_root),
+    )
     payload = {
         "fingerprint": confirmed,
         "items": (
