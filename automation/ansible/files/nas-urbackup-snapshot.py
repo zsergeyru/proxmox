@@ -40,17 +40,51 @@ def run(*argv: str, timeout: int = 60) -> str:
     return p.stdout.strip()
 
 
-def list_backups() -> set[int]:
-    # Не считаем зелёный docker/systemd доказательством резервной копии.
-    raw = run(*CLIENT, "browse")
+def client_status() -> dict:
+    """Get client connection status, not its restore-only browse API."""
+    raw = run(*CLIENT, "status")
     try:
-        items = json.loads(raw)
+        obj = json.loads(raw)
     except ValueError as exc:
-        raise SnapshotError("Нет достоверной истории UrBackup Client") from exc
-    if not isinstance(items, list):
-        raise SnapshotError("Некорректная история файловых копий")
-    return {int(x["id"]) for x in items if isinstance(x, dict) and
-            isinstance(x.get("id"), int)}
+        raise SnapshotError("UrBackup Client не вернул корректный статус JSON") from exc
+    if not isinstance(obj, dict) or not isinstance(obj.get("servers"), list):
+        raise SnapshotError("Неизвестный формат статуса UrBackup Client")
+    return obj
+
+
+def server_current(config: dict) -> str | None:
+    """Read server's *completed* file-backup pointer (never its temp files).
+
+    Per upstream, the server updates current only after all files are
+    downloaded. A successful client-side transfer alone is not enough.
+    """
+    root = Path(config["backup_mount"]) / "urbackup" / "backups"
+    if root.is_symlink() or not root.is_dir():
+        raise SnapshotError("Недостоверен каталог резервного тома UrBackup")
+    client = root / "nas-local"
+    if not client.exists():
+        return None
+    if client.is_symlink() or not client.is_dir():
+        raise SnapshotError("Недостоверен каталог клиента nas-local")
+    current = client / "current"
+    if not current.exists() and not current.is_symlink():
+        return None
+    if not current.is_symlink():
+        raise SnapshotError("Нет подтверждённого current-снимка UrBackup Server")
+    try:
+        target = current.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise SnapshotError("Не читается ссылка current в хранилище UrBackup") from exc
+    # Refuse a redirect into an unrelated directory or another ZFS pool.
+    if not target.is_relative_to(client.resolve()) or target == client:
+        raise SnapshotError("Ссылка UrBackup current выходит за каталог клиента")
+    if not target.is_dir():
+        raise SnapshotError("Неверный каталог последней завершённой копии")
+    # File backup sets are stored under the logical backupdir name.
+    # This prevents counting a completed but empty/unrelated backup.
+    if not (target / "nas-data").is_dir():
+        return None
+    return str(target)
 
 
 def main() -> int:
@@ -75,7 +109,10 @@ def main() -> int:
                             "-o", "name", "-r", ds)
         if any(name.startswith(ds + "@urbackup-") for name in old_snapshots.splitlines()):
             raise SnapshotError("Сохранился снимок незавершённого задания; нельзя создавать новый")
-        previous = list_backups()
+        connection = client_status()
+        if not connection["servers"] or connection.get("internet_status") != "connected_local":
+            raise SnapshotError("UrBackup Client ещё не подключён к локальному серверу")
+        previous = server_current(config)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         name = "urbackup-" + stamp + "-" + str(os.getpid())
         if not re.fullmatch(r"urbackup-[0-9T]+Z-[0-9]+", name):
@@ -116,15 +153,18 @@ def main() -> int:
             configured = True
             if GUEST_SOURCE not in run(*CLIENT, "list-backupdirs"):
                 raise SnapshotError("Клиент не подтвердил включение пути ZFS snapshot")
+            # Upstream start -f *blocks* until the exact file-backup process
+            # reports success. Server-side file organization may continue.
             run(*CLIENT, "start", "-f", timeout=21600)
-            deadline = time.monotonic() + 180
+            deadline = time.monotonic() + 1800
             while time.monotonic() < deadline:
-                if list_backups() - previous:
+                current = server_current(config)
+                if current is not None and current != previous:
                     confirmed = True
-                    print("Файловая копия NAS завершена и записана в историю UrBackup")
+                    print("UrBackup NAS: клиент завершил задание, сервер опубликовал новую полную копию")
                     return 0
                 time.sleep(5)
-            raise SnapshotError("UrBackup не подтвердил новую точку восстановления")
+            raise SnapshotError("Сервер не подтвердил новый завершённый архив nas-local/current")
         finally:
             if not confirmed:
                 # Неподтверждённое задание может всё ещё читать файлы.
