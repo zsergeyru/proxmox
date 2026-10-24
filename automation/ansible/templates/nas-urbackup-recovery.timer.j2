@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily encrypted copy of NAS UrBackup configuration/database
+[Timer]
+OnCalendar=*-*-* {{ nas_urbackup_recovery_schedule }}:00
+Persistent=true
+RandomizedDelaySec=0
+Unit=nas-urbackup-recovery.service
+[Install]
+WantedBy=timers.target
