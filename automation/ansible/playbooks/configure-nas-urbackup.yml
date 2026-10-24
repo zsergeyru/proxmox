@@ -100,10 +100,6 @@
         group: nas-urbackup
         mode: "0750"
 
-    - name: Подготовить резервные папки строго на проверенном ZFS
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, prepare]
-      changed_when: false
-
     - name: Назначить права только новому собственному каталогу файлов UrBackup
       ansible.builtin.file:
         path: "{{ nas_backup_mountpoint }}/urbackup/backups"
@@ -120,6 +116,10 @@
         group: root
         mode: "0600"
       register: nas_urbackup_compose
+
+    - name: Подготовить резервные папки строго на проверенном ZFS
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, prepare]
+      changed_when: false
 
     - name: Проверить Docker Compose перед запуском
       ansible.builtin.command:
