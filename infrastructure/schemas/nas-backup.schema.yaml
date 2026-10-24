@@ -41,11 +41,4 @@ properties:
       keep_daily: {type: integer, minimum: 7, maximum: 365}
       keep_weekly: {type: integer, minimum: 4, maximum: 104}
       max_parallel_jobs: {const: 1}
-      server_state_schedule: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]
-}
-  migration:
-    type: object
-    additionalProperties: false
-    required: [preserve_legacy]
-    properties:
-      preserve_legacy: {const: true}
+      server_state_schedule: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'}
