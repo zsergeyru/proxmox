@@ -1,0 +1,89 @@
+---
+- name: Настроить автономное резервирование ZFS через UrBackup Client
+  hosts: nas
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Сверить безопасное расписание
+      ansible.builtin.assert:
+        that:
+          - nas_urbackup_schedule is match('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+          - nas_data_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+          - nas_backup_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+        fail_msg: Неподтверждённое расписание NAS
+
+    - name: Проверить источники до подготовки клиента
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, preflight]
+      changed_when: false
+
+    - name: Установить проверяемый исполнитель ZFS снимка
+      ansible.builtin.copy:
+        src: ../files/nas-urbackup-snapshot.py
+        dest: /usr/local/sbin/nas-urbackup-snapshot
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Проверить наличие Linux UrBackup Client
+      ansible.builtin.stat:
+        path: /usr/local/bin/urbackupclientctl
+      register: nas_urbackup_client_installed
+
+    - name: Подготовить закрытый каталог установщика
+      ansible.builtin.file:
+        path: /var/cache/nas-apps
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+      when: not nas_urbackup_client_installed.stat.exists
+
+    - name: Скачать фиксированный UrBackup Client 2.5.31 по HTTPS
+      ansible.builtin.get_url:
+        url: "https://hndl.urbackup.org/Client/2.5.31/UrBackup%20Client%20Linux%202.5.31.sh"
+        dest: /var/cache/nas-apps/urbackup-client-2.5.31.sh
+        mode: "0600"
+        owner: root
+        group: root
+        timeout: 60
+      when: not nas_urbackup_client_installed.stat.exists
+
+    - name: Установить Linux-клиент без интерактивных вопросов
+      ansible.builtin.command:
+        argv: [sh, /var/cache/nas-apps/urbackup-client-2.5.31.sh, --quiet]
+        creates: /usr/local/bin/urbackupclientctl
+      when: not nas_urbackup_client_installed.stat.exists
+      no_log: true
+
+    - name: Подтвердить версию клиента после установки
+      ansible.builtin.command: [/usr/local/bin/urbackupclientctl, --version]
+      changed_when: false
+
+    - name: Проверить и включить Linux-клиент
+      ansible.builtin.systemd_service:
+        name: urbackupclientbackend.service
+        enabled: true
+        state: started
+
+    - name: Установить локальное задание UrBackup
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup-local.service.j2
+        dest: /etc/systemd/system/nas-urbackup-local.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Установить расписание локального UrBackup
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup-local.timer.j2
+        dest: /etc/systemd/system/nas-urbackup-local.timer
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Включить ежедневное задание NAS
+      ansible.builtin.systemd_service:
+        name: nas-urbackup-local.timer
+        enabled: true
+        state: started
+        daemon_reload: true
