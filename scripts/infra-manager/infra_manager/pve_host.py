@@ -374,6 +374,12 @@ def install_operator_host_support(node: str, repo_root: Path) -> None:
     )
     _install_remote_file(
         node,
+        host_root / "infra_manager_host_credentials.py",
+        OPERATOR_HOST_COMMAND.with_name("infra_manager_host_credentials.py"),
+        "0644",
+    )
+    _install_remote_file(
+        node,
         host_root / "infra_manager_python_deps.py",
         OPERATOR_HOST_COMMAND.with_name("infra_manager_python_deps.py"),
         "0644",
