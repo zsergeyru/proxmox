@@ -6,7 +6,7 @@ import json
 import shlex
 import socket
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 import yaml
@@ -145,14 +145,14 @@ def _resolve_password(
     )
 
 
-def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
-    """Загрузить проверки гостя из status.yaml с проверкой версии схемы.
-
-    Ошибки описания не заменяются пустым списком проверок."""
-    path = identity.directory / "status.yaml"
+def load_declared_checks(
+    path: Path, *, identity_field: str, identity_value: str | int,
+) -> tuple[dict[str, Any], ...]:
+    """Load common status checks for either a guest VMID or a physical host."""
+    if identity_field not in ("guest_vmid", "host"):
+        raise InfraManagerError("Неизвестный тип идентификатора статуса")
     if not path.is_file():
-        return ()
-
+        raise InfraManagerError(f"Отсутствует обязательный статус объекта: {path}")
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
@@ -165,9 +165,9 @@ def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
         raise InfraManagerError(
             f"{path}: неподдерживаемая версия описания состояния"
         )
-    if raw.get("guest_vmid") != identity.vmid:
+    if raw.get(identity_field) != identity_value:
         raise InfraManagerError(
-            f"{path}: guest_vmid не соответствует guest.yaml"
+            f"{path}: идентификатор status.yaml не соответствует объекту"
         )
 
     checks = raw.get("checks", [])
@@ -194,6 +194,13 @@ def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
     return tuple(normalized)
 
 
+def _load_common_checks(identity: GuestIdentity) -> tuple[dict[str, Any], ...]:
+    path = identity.directory / "status.yaml"
+    if not path.is_file():
+        return ()
+    return load_declared_checks(path, identity_field="guest_vmid", identity_value=identity.vmid)
+
+
 def _check_tcp(address: str, port: int) -> None:
     """Проверить доступность указанного порта с ограничением времени ожидания."""
     try:
@@ -211,12 +218,14 @@ def _run_declared_check(
     check: dict[str, Any],
     *,
     project_branch: str | None = None,
+    remote_executor: Callable[..., Any] | None = None,
 ) -> None:
     """Выполнить только разрешённую проверку из status.yaml.
 
     Неизвестный тип или некорректные параметры считаются ошибкой
     описания, а не успешной проверкой службы."""
     check_type = check["type"]
+    execute = remote_executor or _run_guest_command
 
     if check_type == "tcp":
         port = check.get("port")
@@ -231,7 +240,7 @@ def _run_declared_check(
             raise InfraManagerError(
                 "docker-проверка требует имя container"
             )
-        result = _run_guest_command(
+        result = execute(
             node,
             address,
             [
@@ -254,7 +263,7 @@ def _run_declared_check(
             raise InfraManagerError(
                 "docker_image-проверка требует имя image"
             )
-        _run_guest_command(
+        execute(
             node,
             address,
             ["docker", "image", "inspect", "--format", "{{.Id}}", image],
@@ -267,7 +276,7 @@ def _run_declared_check(
             raise InfraManagerError(
                 "systemd-проверка требует имя unit"
             )
-        _run_guest_command(
+        execute(
             node,
             address,
             ["systemctl", "is-active", "--quiet", unit],
@@ -280,7 +289,7 @@ def _run_declared_check(
             raise InfraManagerError(
                 "file-проверка требует абсолютный path"
             )
-        _run_guest_command(
+        execute(
             node,
             address,
             ["test", "-s", path],
@@ -300,7 +309,7 @@ def _run_declared_check(
                 f"INFRA_PROJECT_BRANCH={project_branch}",
                 *argv,
             ]
-        result = _run_guest_command(
+        result = execute(
             node,
             address,
             argv,
@@ -398,6 +407,7 @@ def _service_fields(
     service: dict[str, Any],
     *,
     show_secrets: bool,
+    password_resolver: Callable[[dict[str, str]], str] | None = None,
 ) -> list[tuple[str, str]]:
     """Собрать отображаемые поля службы и операторских учётных записей.
 
@@ -427,9 +437,9 @@ def _service_fields(
     accounts = operator.get("accounts")
     if isinstance(accounts, list):
         for account in accounts:
-            fields.extend(_operator_fields(node, address, account, show_secrets=show_secrets))
+            fields.extend(_operator_fields(node, address, account, show_secrets=show_secrets, password_resolver=password_resolver))
     else:
-        fields.extend(_operator_fields(node, address, operator, show_secrets=show_secrets))
+        fields.extend(_operator_fields(node, address, operator, show_secrets=show_secrets, password_resolver=password_resolver))
     if isinstance(auth, str) and auth:
         fields.append(("Пароль", f"через {auth}"))
     return fields
@@ -441,6 +451,7 @@ def _operator_fields(
     operator: dict[str, Any],
     *,
     show_secrets: bool,
+    password_resolver: Callable[[dict[str, str]], str] | None = None,
 ) -> list[tuple[str, str]]:
     """Показать одну учётную запись, читая пароль только в доверенном режиме."""
     fields: list[tuple[str, str]] = []
@@ -450,7 +461,7 @@ def _operator_fields(
     password = operator.get("password")
     if isinstance(password, dict):
         value = (
-            _resolve_password(node, address, password)
+            (password_resolver(password) if password_resolver else _resolve_password(node, address, password))
             if show_secrets
             else "скрыт"
         )
