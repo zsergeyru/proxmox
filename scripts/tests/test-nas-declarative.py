@@ -70,6 +70,15 @@ def test_provision_and_fail_closed_phases() -> None:
         check_modified(lambda d: d["deployment"].update(components=[
             "urbackup_client", "urbackup_server", "apps", "smb"
         ]))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            urbackup_client=[]
+        ))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            apps=["smb"]
+        ))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            urbackup_server=["urbackup_client"]
+        ))
         # Reordering independent applications is declarative, not hardcoded.
         rearranged = copy.deepcopy(p)
         rearranged["deployment"]["components"] = [
@@ -114,6 +123,11 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
         and "services.get('qbittorrent'" in item
         for item in assertions
     ), "Disabled apps must not require a qBittorrent service"
+    assert not any(
+        "components == ['urbackup_server'" in item for item in assertions
+    ), "Component composition must not be hardcoded"
+    assert any("difference(" in item for item in assertions)
+    assert "subelements('value')" in str(main), "Declared dependencies must be enforced"
     paths = [
         "base.yml", "urbackup_server.yml", "urbackup_client.yml", "apps.yml", "smb.yml",
     ]
