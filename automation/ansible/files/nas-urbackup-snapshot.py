@@ -72,6 +72,7 @@ def main() -> int:
         mounted = False
         created = False
         configured = False
+        confirmed = False
         try:
             run("zfs", "snapshot", snapshot)
             created = True
@@ -98,13 +99,21 @@ def main() -> int:
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 if list_backups() - previous:
+                    confirmed = True
                     print("Файловая копия NAS завершена и записана в историю UrBackup")
                     return 0
                 time.sleep(5)
             raise SnapshotError("UrBackup не подтвердил новую точку восстановления")
         finally:
+            if not confirmed:
+                # Неподтверждённое задание может всё ещё читать файлы.
+                # Не отключать источник и не уничтожать снимок до
+                # диагностики; следующая операция явно обнаружит занятый mount.
+                print("ПРЕДУПРЕЖДЕНИЕ: временный ZFS snapshot сохранён "
+                      "до проверки завершения клиента", file=sys.stderr)
+                if created:
+                    return 2
             if configured:
-                # Если клиент занят, не уничтожать снимок вслепую.
                 run(CLIENT, "remove-backupdir", "-n", "nas-data")
             if mounted:
                 # Никогда не удалять снимок, пока его читает резервная задача.
