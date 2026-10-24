@@ -87,3 +87,15 @@
         enabled: true
         state: started
         daemon_reload: true
+
+    - name: Проверить наличие старого таймера ZFS без изменения его архивов
+      ansible.builtin.stat:
+        path: /etc/systemd/system/nas-zfs-backup.timer
+      register: nas_old_backup_timer
+
+    - name: Отключить старое пустое расписание ZFS после настройки UrBackup
+      ansible.builtin.systemd_service:
+        name: nas-zfs-backup.timer
+        enabled: false
+        state: stopped
+      when: nas_old_backup_timer.stat.exists
