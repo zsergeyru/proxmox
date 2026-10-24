@@ -96,6 +96,18 @@ def main() -> int:
             run("mount", "-o", "remount,bind,ro", str(MOUNT))
             if not os.path.ismount(str(MOUNT)):
                 raise SnapshotError("Нельзя подтвердить bind-mount согласованного снимка")
+            # Verify Docker actually received the *mounted* ZFS snapshot.
+            # Directory existence alone would allow a misleading empty backup.
+            mountinfo = run("docker", "exec", "nas-urbackup-client",
+                            "cat", "/proc/self/mountinfo")
+            if not any(
+                len(fields) > 5 and fields[4] == GUEST_SOURCE
+                and "ro" in fields[5].split(",")
+                for fields in (line.split() for line in mountinfo.splitlines())
+            ):
+                raise SnapshotError(
+                    "Docker не видит read-only mount ZFS снимка: резервирование запрещено"
+                )
             # Директория клиента существует ТОЛЬКО во время жизни снимка.
             # В остальное время нет пути, из которого UrBackup мог бы
             # автоматически сохранить пустой каталог вместо файлов NAS.
