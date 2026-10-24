@@ -44,12 +44,10 @@ def main() -> int:
     assert merged["groups"] == catalog["groups"]
     assert merged["users"] == catalog["users"]
     assert set(merged["shares"]) == {"shared", "movies", "music", "data"}
-    assert all(
-        not merged["shares"][share]["read_groups"]
-        and not merged["shares"][share]["write_groups"]
-        for share in merged["shares"]
-    )
-    refuses(lambda: require_nas_users_configured(ROOT))
+    assert merged["schema_version"] == 2
+    assert merged["mode"] == "guest_only"
+    assert all(rights == {"access": "read_write"} for rights in merged["shares"].values())
+    assert require_nas_users_configured(ROOT) == merged
 
     access_path = ROOT / "infrastructure/hosts/nas/access.yaml"
     rights = yaml.safe_load(access_path.read_text(encoding="utf-8"))
@@ -61,8 +59,7 @@ def main() -> int:
         {"name": "samplemanager", "groups": ["admins", "family"]},
     ]
     ready_rights = copy.deepcopy(rights)
-    ready_rights["shares"]["shared"]["write_groups"] = ["family"]
-    ready_rights["shares"]["data"]["write_groups"] = ["admins"]
+    assert ready_rights["mode"] == "guest_only"
     assert validate_user_catalog(ROOT, ready_catalog) == ready_catalog
     assert validate_nas_access(ROOT, ready_rights, ready_catalog) == ready_rights
 
@@ -99,7 +96,7 @@ def main() -> int:
     refuses(lambda: validate_user_catalog(ROOT, invalid))
 
     invalid = copy.deepcopy(ready_rights)
-    invalid["shares"]["music"]["read_groups"] = ["not-existing"]
+    invalid["shares"]["music"]["access"] = "read_only"
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
@@ -107,7 +104,11 @@ def main() -> int:
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
-    invalid["shares"]["rogue"] = {"read_groups": [], "write_groups": []}
+    invalid["shares"]["rogue"] = {"access": "read_write"}
+    refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
+
+    invalid = copy.deepcopy(ready_rights)
+    invalid["mode"] = "password"
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
@@ -125,7 +126,7 @@ def main() -> int:
     allowed = provision["web_gateway"]["authelia"]["authentication"]["groups"]
     assert set(allowed) == set(catalog["groups"])
 
-    print("[ОК] Пользователи общие, права локальны, Authelia согласована, секретов нет")
+    print("[ОК] Samba guest_only/read_write, пароли не используются, Authelia отдельно")
     return 0
 
 
