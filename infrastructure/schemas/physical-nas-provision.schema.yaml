@@ -71,7 +71,7 @@ $defs:
       address: {const: auto_omv}
       url:
         type: string
-        pattern: '^https?://(\\{address\\}|127[.]0[.]0[.]1):[0-9]{2,5}/$'
+        pattern: '^https?://(\{address\}|127[.]0[.]0[.]1):[0-9]{2,5}/$'
       access: {type: string, minLength: 1, maxLength: 200}
       operator: {$ref: '#/$defs/operator'}
     oneOf:
