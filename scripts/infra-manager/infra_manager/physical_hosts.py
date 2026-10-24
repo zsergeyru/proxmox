@@ -62,30 +62,11 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     # систему и связь с ней. Не поддерживать конкурирующий источник данных.
     storage = load_physical_storage(repo_root, name)
     driver = data["management"]["driver"]
-    roles = [entry["role"] for entry in storage.devices]
-    if driver == "omv8":
-        # Исполнитель сейчас независимо выбирает /dev/disk/by-id по серийному
-        # номеру с NAS. Заданное в Git значение by_id пока не проверяется
-        # им на оборудовании; запрещаем делать вид, что оно проверено.
-        if any(entry["by_id"] is not None for entry in storage.devices):
-            raise InfraManagerError(
-                f"{storage.manifest}: закрепление by_id будет поддержано "
-                "только после проверки его исполнителем NAS; пока укажите null"
-            )
-        for role in ("shared", "data", "backup"):
-            if roles.count(role) != 1:
-                raise InfraManagerError(
-                    f"{storage.manifest}: NAS требует ровно один диск роли {role}"
-                )
-        if {entry["id"] for entry in storage.volumes} != {
-            "shared", "data", "backup"
-        }:
-            raise InfraManagerError(
-                f"{storage.manifest}: NAS требует тома shared, data и backup"
-            )
+    # Every storage-specific invariant belongs to the selected driver.
+    from .physical_host_drivers import validate_driver_storage
+    validate_driver_storage(repo_root, driver, storage)
 
-    # Пока исполнитель NAS использует проверенный прежний внутренний
-    # контракт, преобразование делается только здесь. Дублирования в Git нет.
+    # Generic conversion from verified storage.yaml into runtime disk metadata.
     devices = tuple({
         "role": entry["role"], "model": entry["model"],
         "capacity_gb": entry["capacity_gb"], "serial": entry["serial"],
@@ -106,28 +87,11 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
                 "pool_guid": entry["pool_guid"],
                 "omv_reference": entry.get("omv_reference"),
             })
-        elif driver == "omv8":
+        else:
             raise InfraManagerError(
-                f"{storage.manifest}: LVM не используется для томов NAS"
+                f"{storage.manifest}: неподдерживаемый тип файловой системы"
             )
         volumes[name_of_volume] = volume
-    if driver == "omv8":
-        expected = {"shared": "ext4", "data": "zfs_pool", "backup": "zfs_pool"}
-        kinds = {entry["id"]: entry["kind"] for entry in storage.volumes}
-        if kinds != expected:
-            raise InfraManagerError(
-                f"{storage.manifest}: неверный тип файловой системы NAS"
-            )
-        for entry in storage.volumes:
-            if entry["device"] != entry["id"]:
-                raise InfraManagerError(
-                    f"{storage.manifest}: том NAS назначен чужой роли накопителя"
-                )
-        for role in ("data", "backup"):
-            if volumes[role]["pool"] != "nas-" + role:
-                raise InfraManagerError(
-                    f"{storage.manifest}: некорректное имя ZFS-пула {role}"
-                )
     # Незаполненные серийные номера допустимы для первоначального плана.
     # Постоянная идентичность потом подтверждается планом и сохранённым состоянием.
     conn = data["connection"]
