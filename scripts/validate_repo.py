@@ -784,7 +784,7 @@ def _validate_physical_hosts() -> None:
     from infra_manager.guest_catalog import guests_by_provision_section
     from infra_manager.physical_hosts import list_physical_hosts
     from infra_manager.physical_nas_ansible import load_nas_provision
-    from infra_manager.guest_status import load_declared_checks
+    from infra_manager.physical_nas_status import load_nas_status
     from infra_manager.physical_nas_users import load_nas_users
     from infra_manager.user_catalog import load_user_catalog
 
@@ -792,11 +792,8 @@ def _validate_physical_hosts() -> None:
         catalog = load_user_catalog(ROOT)
         list_physical_hosts(ROOT)
         load_nas_users(ROOT)
-        load_nas_provision(ROOT)
-        load_declared_checks(
-            ROOT / "infrastructure/hosts/nas/status.yaml",
-            identity_field="host", identity_value="nas",
-        )
+        nas_provision = load_nas_provision(ROOT)
+        load_nas_status(ROOT, "nas", nas_provision)
         gateways = guests_by_provision_section(ROOT, "web_gateway")
         if len(gateways) != 1:
             raise InfraManagerError("Ожидается ровно один гость с веб-шлюзом")
