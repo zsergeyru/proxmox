@@ -1,9 +1,0 @@
----
-# Compatibility entrypoint; deploy nas uses deploy-nas.yml and the nas role.
-- name: Настроить базовые компоненты физического NAS
-  hosts: nas
-  gather_facts: true
-  become: false
-  roles:
-    - role: nas
-      tasks_from: base
