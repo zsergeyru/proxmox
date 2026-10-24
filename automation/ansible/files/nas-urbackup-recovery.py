@@ -68,7 +68,9 @@ def backup() -> None:
     ensure_key()
     if not STORE.is_dir():
         raise RecoveryError("Нет постоянной базы UrBackup")
-    if cmd("systemctl", "is-active", NAS_BACKUP) == "active":
+    if subprocess.run(["systemctl", "is-active", "--quiet", NAS_BACKUP],
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      timeout=20, check=False).returncode == 0:
         raise RecoveryError("Идёт локальное файловое копирование; база не останавливается")
     key = KEY.read_text(encoding="utf-8").strip()
     if len(key) < 48:
@@ -89,8 +91,8 @@ def backup() -> None:
     running = subprocess.run(["systemctl", "is-active", "--quiet", SERVICE]).returncode == 0
     if not running:
         raise RecoveryError("UrBackup Server не работает; не останавливать и не упаковывать непроверенную базу")
-    cmd("systemctl", "stop", SERVICE)
     try:
+        cmd("systemctl", "stop", SERVICE)
         env = os.environ.copy()
         env["NAS_URBACKUP_RECOVERY_KEY"] = key
         with temp.open("xb") as encrypted:
