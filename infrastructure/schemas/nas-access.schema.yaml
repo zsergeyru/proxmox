@@ -12,26 +12,7 @@ properties:
     minProperties: 1
     maxProperties: 16
     patternProperties:
-      '^[a-z][a-z0-9-]{0,30}
-$defs:
-  permissions:
-    type: object
-    additionalProperties: false
-    required: [read_groups, write_groups]
-    properties:
-      read_groups:
-        type: array
-        uniqueItems: true
-        items:
-          type: string
-          pattern: '^[a-z][a-z0-9_-]{1,31}$'
-      write_groups:
-        type: array
-        uniqueItems: true
-        items:
-          type: string
-          pattern: '^[a-z][a-z0-9_-]{1,31}$'
-:
+      '^[a-z][a-z0-9-]{0,30}$':
         $ref: '#/$defs/permissions'
 $defs:
   permissions:
