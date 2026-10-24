@@ -240,6 +240,7 @@ def test_permanent_docker_client_contract():
     assert "nas-urbackup-lan" in server_compose
     assert "nas-urbackup-lan" in client_compose
     assert "external: true" in client_compose
+    assert "name: nas-urbackup-client" in client_compose
     assert "uroni/urbackup-client" not in server_compose
     assert 'entrypoint: ["/usr/local/sbin/urbackupclientbackend"]' in client_compose
     assert "URBACKUP_CLIENT_AUTHKEY" not in client_compose
