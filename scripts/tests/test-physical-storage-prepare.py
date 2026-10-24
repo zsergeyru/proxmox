@@ -220,6 +220,66 @@ def test_storage_state():
             "serials": {**data["serials"], "backup": "OTHER"}}), InfraManagerError)
 
 
+def test_recovered_result_uses_original_approved_fingerprint() -> None:
+    """После форматирования текущий preserve-план не заменяет исходный отпечаток."""
+
+    host, original = sample_plan()
+    original_fingerprint = original.fingerprint
+    disks = (
+        DiskInspection("/dev/sda", "SPCC", "SYSTEM-TEST",
+                       120_000_000_000, True, True),
+        DiskInspection("/dev/sdb", "ST1000DM003", "SHARED-TEST",
+                       1_000_000_000_000, False, True),
+        DiskInspection("/dev/sdc", "ST4000VX016", "ZFS-A",
+                       4_000_000_000_000, False, True),
+        DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B",
+                       4_000_000_000_000, False, True),
+    )
+    current = propose_storage(host.devices, disks)
+    assert all(item.action == "preserve" for item in current.assignments)
+    assert original_fingerprint != current.fingerprint
+    report = {
+        "fingerprint": original_fingerprint,
+        "serials": {item.role: item.serial for item in current.assignments
+                    if item.role != "system"},
+        "volumes": {
+            "shared": {
+                "mountpoint": "/srv/dev-disk-by-uuid-62efe809-f358-4c75-a465-63fc7c617104",
+                "filesystem_uuid": "62efe809-f358-4c75-a465-63fc7c617104",
+                "omv_reference": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            },
+            "data": {
+                "mountpoint": "/nas-data", "pool": "nas-data",
+                "pool_guid": "4080170063689670128",
+                "omv_reference": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+            },
+            "backup": {
+                "mountpoint": "/nas-backup", "pool": "nas-backup",
+                "pool_guid": "7608598756680166915",
+                "omv_reference": "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa",
+            },
+        },
+    }
+    # Прежняя проверка ошибочно сравнивала journal.fingerprint с текущим preserve-планом.
+    refuses(lambda: _check_result(host, current, report), InfraManagerError)
+    finished = _check_result(
+        host, current, report, expected_fingerprint=original_fingerprint
+    )
+    assert finished.volumes == report["volumes"]
+    assert {item["serial"] for item in finished.devices} == {
+        "SYSTEM-TEST", "SHARED-TEST", "ZFS-A", "ZFS-B"
+    }
+    # Ни чужой отпечаток, ни подмена HDD не проходят проверку восстановления.
+    refuses(lambda: _check_result(
+        host, current, {**report, "fingerprint": current.fingerprint},
+        expected_fingerprint=original_fingerprint,
+    ), InfraManagerError)
+    refuses(lambda: _check_result(
+        host, current, {**report, "serials": {**report["serials"], "data": "OTHER"}},
+        expected_fingerprint=original_fingerprint,
+    ), InfraManagerError)
+
+
 def test_remote_preflight():
     """Исполнитель не создаёт разделы без отсутствия сигнатур и by-id."""
 
@@ -653,6 +713,7 @@ def main():
     test_existing_shared_confirmation()
     test_missing_disk_state_blocks_approval()
     test_storage_state()
+    test_recovered_result_uses_original_approved_fingerprint()
     test_remote_preflight()
     test_mixed_preflight_only_checks_blank_zfs_disks()
     test_preserved_shared_verification()
