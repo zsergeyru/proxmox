@@ -88,7 +88,7 @@ def require_nas_smb_secret(document: dict[str, object]) -> None:
     if path.is_symlink() or not path.is_file():
         raise InfraManagerError(
             "Не задан защищённый пароль Samba на 910; "
-            "создайте /mnt/persistent-state/physical-hosts/nas-smb-password (0600)"
+            "создайте /var/lib/infra-manager/physical-hosts/nas-smb-password (0600)"
         )
     try:
         info = path.stat()
