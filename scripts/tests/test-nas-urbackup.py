@@ -313,7 +313,7 @@ def test_bind_mount_detection_uses_findmnt_not_python_ismount():
     """A bind mount on its own filesystem is not reliably detected by os.path."""
     mount = module("nas-urbackup-client-mount.py", "nas_bind_detection_test")
     with patch.object(mount.subprocess, "run", return_value=SimpleNamespace(
-        returncode=0, stdout=str(mount.STAGING) + "\\n"
+        returncode=0, stdout=str(mount.STAGING) + "\n"
     )) as subprocess_run, patch.object(
         mount.os.path, "ismount", side_effect=AssertionError("do not use ismount")
     ):
