@@ -6,7 +6,10 @@
       - nas_provision.schema_version == 1
       - nas_provision.host == 'nas'
       - nas_provision.deployment.phases == ['base', 'services']
-      - nas_provision.deployment.components == ['urbackup_server', 'urbackup_client', 'apps', 'smb']
+      - nas_provision.deployment.components | difference(['urbackup_server', 'urbackup_client', 'apps', 'smb']) | length == 0
+      - nas_provision.deployment.components | unique | length == nas_provision.deployment.components | length
+      - "'urbackup_client' not in nas_provision.deployment.components or 'urbackup_server' in nas_provision.deployment.components"
+      - "'urbackup_client' not in nas_provision.deployment.components or nas_provision.deployment.components.index('urbackup_server') < nas_provision.deployment.components.index('urbackup_client')"
       - nas_provision.services.qbittorrent.image is match('^lscr.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$')
     fail_msg: Некорректный или неподдерживаемый декларативный план NAS
 
