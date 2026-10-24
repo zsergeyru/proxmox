@@ -100,5 +100,3 @@ def require_nas_smb_secret(document: dict[str, object]) -> str:
             or any(c in password for c in ("\n", "\r", "\x00"))):
         raise InfraManagerError("Файл пароля Samba повреждён или недостаточно защищён (0600)")
     return password
-
-
