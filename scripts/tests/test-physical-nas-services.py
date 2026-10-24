@@ -288,6 +288,38 @@ def test_samba_service_automation() -> None:
     assert "/etc/samba/smb.conf" not in content
 
 
+def test_samba_safe_error_hints() -> None:
+    """Выводим только категории ошибок из фиксированного словаря."""
+
+    ansible = ModuleType("ansible")
+    plugins = ModuleType("ansible.plugins")
+    callback_module = ModuleType("ansible.plugins.callback")
+    callback_module.CallbackBase = object
+    path = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    spec = importlib.util.spec_from_file_location("test_samba_callback", path)
+    assert spec is not None and spec.loader is not None
+    module_obj = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "ansible": ansible,
+        "ansible.plugins": plugins,
+        "ansible.plugins.callback": callback_module,
+    }):
+        spec.loader.exec_module(module_obj)
+
+    reasons = module_obj.CallbackModule._samba_reasons
+    for message, expected in (
+        ("bind: Address already in use on port 445", "Порт Samba"),
+        ("failed to load services from smb.conf", "конфигурации"),
+        ("Unit smbd.service is masked", "заблокирована"),
+    ):
+        classifications = reasons(message + " confidential-value-1234")
+        assert any(expected in item for item in classifications)
+        assert all("confidential-value-1234" not in item for item in classifications)
+    assert "confidential-value-1234" not in " ".join(
+        reasons("confidential-value-1234")
+    )
+
+
 def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
@@ -295,6 +327,7 @@ def main() -> int:
     test_omv_shared_folders_use_real_database_uuids()
     test_omv_cli_failure_never_exposes_stderr()
     test_samba_service_automation()
+    test_samba_safe_error_hints()
     test_backup_identifiers()
     test_no_forced_rollback()
     test_qbittorrent_failure_diagnostics()
