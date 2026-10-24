@@ -8,4 +8,5 @@ Type=oneshot
 User=root
 Group=root
 ExecStart=/usr/local/sbin/nas-urbackup-recovery backup
+ExecStartPost=/usr/local/sbin/nas-urbackup-recovery verify
 TimeoutStartSec=1h
