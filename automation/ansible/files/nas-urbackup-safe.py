@@ -110,13 +110,23 @@ def initialize_admin() -> None:
             raise SafetyError("Отсутствует исходный защищённый пароль администратора")
         return
     db_dir = ROOT / "server"
-    if any(db_dir.iterdir()):
-        raise SafetyError("Есть база без отметки инициализации; не перезаписываем её")
-    # Секрет не попадает в Git, аргументы Ansible, командный вывод или журналы.
-    pwd = secrets.token_urlsafe(36)
-    fd = os.open(str(PASSWORD), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as output:
-        output.write(pwd + "\n")
+    if PASSWORD.is_symlink():
+        raise SafetyError("Недопустима ссылка на пароль администратора")
+    # Если первая попытка прервалась после записи пароля, повторяем её с
+    # тем же секретом; существующую базу не пересоздаём и не удаляем.
+    if PASSWORD.exists():
+        if not PASSWORD.is_file() or PASSWORD.stat().st_mode & 0o077:
+            raise SafetyError("Небезопасное хранение пароля администратора")
+        pwd = PASSWORD.read_text(encoding="utf-8").strip()
+        if len(pwd) < 32:
+            raise SafetyError("Некорректный ранее созданный пароль")
+    else:
+        if any(db_dir.iterdir()):
+            raise SafetyError("Есть база без известного пароля: нельзя переинициализировать")
+        pwd = secrets.token_urlsafe(36)
+        fd = os.open(str(PASSWORD), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as output:
+            output.write(pwd + "\n")
     args = ["docker", "compose", "-f", str(COMPOSE), "run", "--rm",
             "--no-deps", "-T", "urbackup", "reset-admin-pw",
             "-a", "admin", "-p", pwd]
