@@ -69,6 +69,7 @@ def run_nas_phase(
     *,
     provision: dict,
     policy: dict,
+    access: dict | None = None,
     verified_volumes: dict[str, object] | None = None,
     host_volumes: dict[str, dict] | None = None,
 ) -> None:
@@ -77,6 +78,12 @@ def run_nas_phase(
         raise InfraManagerError("Неизвестный этап декларативного deploy NAS")
     if phase == "services" and (not verified_volumes or not host_volumes):
         raise InfraManagerError("Нельзя разворачивать сервисы без проверки физических томов")
+    if (phase == "services" and "smb" in provision["deployment"]["components"]
+            and (not access or access.get("mode") != "guest_only"
+                 or set(access.get("shares", {})) != {
+                     share["name"] for share in provision["shares"]
+                 })):
+        raise InfraManagerError("Нет согласованной гостевой политики SMB")
     if not session.host.address or session.host.name != provision["host"]:
         raise InfraManagerError("Неподтверждённый адрес физического NAS")
     playbook = repo_root / "automation" / "ansible" / "playbooks" / "deploy-nas.yml"
@@ -88,6 +95,7 @@ def run_nas_phase(
         "nas_deploy_phase": phase,
         "nas_provision": provision,
         "nas_backup_policy": policy,
+        "nas_access_policy": access if access is not None else {},
     }
     if phase == "services":
         assert verified_volumes is not None and host_volumes is not None
