@@ -98,9 +98,18 @@ def test_volume_contract():
         SimpleNamespace(role="data", source="nas-data", mountpoint="/nas-data", filesystem="zfs"),
         SimpleNamespace(role="backup", source="nas-backup", mountpoint="/nas-backup", filesystem="zfs"),
     ]
-    assert verify_nas_backup_volumes(policy, tuple(v)) == ("/nas-data", "/nas-backup")
+    expected = {"data": "nas-data", "backup": "nas-backup"}
+    assert verify_nas_backup_volumes(
+        policy, tuple(v), expected_pools=expected,
+    ) == ("/nas-data", "/nas-backup")
     v[2] = SimpleNamespace(role="backup", source="nas-data", mountpoint="/nas-backup", filesystem="zfs")
-    refuses(lambda: verify_nas_backup_volumes(policy, tuple(v)), InfraManagerError)
+    refuses(lambda: verify_nas_backup_volumes(
+        policy, tuple(v), expected_pools=expected,
+    ), InfraManagerError)
+    v[2] = SimpleNamespace(role="backup", source="nas-backup", mountpoint="/nas-backup", filesystem="zfs")
+    refuses(lambda: verify_nas_backup_volumes(
+        policy, tuple(v), expected_pools={"data": "nas-backup", "backup": "nas-data"},
+    ), InfraManagerError)
 
 
 def test_live_guard_is_read_only():
