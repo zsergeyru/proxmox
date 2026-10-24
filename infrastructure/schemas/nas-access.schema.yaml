@@ -1,11 +1,18 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: Guest-only network share access on the physical NAS
+title: Authenticated Samba shares on the physical NAS
 type: object
 additionalProperties: false
-required: [schema_version, mode, shares]
+required: [schema_version, mode, credential, shares]
 properties:
-  schema_version: {const: 2}
-  mode: {const: guest_only}
+  schema_version: {const: 3}
+  mode: {const: named_users}
+  credential:
+    type: object
+    additionalProperties: false
+    required: [source, path]
+    properties:
+      source: {const: controller_file}
+      path: {const: /var/lib/infra-manager/physical-hosts/nas-smb-password}
   shares:
     type: object
     additionalProperties: false

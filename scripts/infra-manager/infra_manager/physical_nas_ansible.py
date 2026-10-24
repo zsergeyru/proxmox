@@ -79,11 +79,13 @@ def run_nas_phase(
     if phase == "services" and (not verified_volumes or not host_volumes):
         raise InfraManagerError("Нельзя разворачивать сервисы без проверки физических томов")
     if (phase == "services" and "smb" in provision["deployment"]["components"]
-            and (not access or access.get("mode") != "guest_only"
+            and (not access or access.get("mode") != "named_users"
+                 or not access.get("users")
+                 or access.get("credential", {}).get("source") != "controller_file"
                  or set(access.get("shares", {})) != {
                      share["name"] for share in provision["shares"]
                  })):
-        raise InfraManagerError("Нет согласованной гостевой политики SMB")
+        raise InfraManagerError("Нет согласованной политики SMB с учётными записями")
     if not session.host.address or session.host.name != provision["host"]:
         raise InfraManagerError("Неподтверждённый адрес физического NAS")
     playbook = repo_root / "automation" / "ansible" / "playbooks" / "deploy-nas.yml"

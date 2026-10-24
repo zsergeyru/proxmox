@@ -89,15 +89,15 @@ def validated_folders(value: object) -> tuple[tuple[str, str, str], ...]:
 
 
 def validated_access(value: object, plan: tuple[tuple[str, str, str], ...]) -> None:
-    """Allow only explicit guest-only read/write rights on declared folders."""
+    """Allow only named-user authenticated read/write on declared folders."""
     names = {name for name, _role, _directory in plan}
     if (not isinstance(value, dict) or set(value) != {"mode", "shares"}
-            or value["mode"] != "guest_only"
+            or value["mode"] != "named_users"
             or not isinstance(value["shares"], dict)
             or set(value["shares"]) != names
             or any(rights != {"access": "read_write"}
                    for rights in value["shares"].values())):
-        raise ShareError("SMB: требуется явный guest_only/read_write для всех папок")
+        raise ShareError("SMB: требуется named_users/read_write для всех папок")
 
 
 def plan_shares(
@@ -164,7 +164,7 @@ def plan_shares(
             raise ShareError(f"Несколько SMB-ресурсов используют папку {name}")
         if smb_items:
             item = smb_items[0]
-            if (item.get("guest") != "only"
+            if (item.get("guest") != "no"
                     or item.get("readonly") is not False
                     or item.get("enable") is not True):
                 if not re.fullmatch(
@@ -174,7 +174,7 @@ def plan_shares(
                     raise ShareError(f"Нет подтверждённого UUID ресурса: {name}")
                 # Preserve all unrelated OMV options; update only access.
                 missing_smb.append({
-                    **item, "guest": "only", "readonly": False, "enable": True,
+                    **item, "guest": "no", "readonly": False, "enable": True,
                 })
             continue
         missing_smb.append({
@@ -182,7 +182,7 @@ def plan_shares(
             "enable": True,
             "sharedfolderref": folder_ref,
             "comment": "Домашний NAS",
-            "guest": "only",
+            "guest": "no",
             "readonly": False,
             "browseable": True,
             "recyclebin": False,
@@ -275,7 +275,7 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str,
     if missing_folders or missing_smb or not enabled_before:
         command("omv-salt", "deploy", "run", "samba")
         print("SMB_CHANGED: согласованы ресурсы OMV")
-    print("[ОК] Папки SMB: гостевой доступ без пароля, чтение и запись")
+    print("[ОК] Папки SMB: вход по учётным записям, чтение и запись")
 
 
 def main() -> int:

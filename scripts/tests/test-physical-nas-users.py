@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import copy
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -15,7 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 from infra_manager.common import InfraManagerError
 from infra_manager.user_catalog import load_user_catalog, validate_user_catalog
 from infra_manager.physical_nas_users import (
-    load_nas_users, require_nas_users_configured, validate_nas_access,
+    load_nas_users, require_nas_users_configured, require_nas_smb_secret, validate_nas_access,
 )
 
 
@@ -44,8 +46,9 @@ def main() -> int:
     assert merged["groups"] == catalog["groups"]
     assert merged["users"] == catalog["users"]
     assert set(merged["shares"]) == {"shared", "movies", "music", "data"}
-    assert merged["schema_version"] == 2
-    assert merged["mode"] == "guest_only"
+    assert merged["schema_version"] == 3
+    assert merged["mode"] == "named_users"
+    assert merged["credential"]["source"] == "controller_file"
     assert all(rights == {"access": "read_write"} for rights in merged["shares"].values())
     assert require_nas_users_configured(ROOT) == merged
 
@@ -59,7 +62,7 @@ def main() -> int:
         {"name": "samplemanager", "groups": ["admins", "family"]},
     ]
     ready_rights = copy.deepcopy(rights)
-    assert ready_rights["mode"] == "guest_only"
+    assert ready_rights["mode"] == "named_users"
     assert validate_user_catalog(ROOT, ready_catalog) == ready_catalog
     assert validate_nas_access(ROOT, ready_rights, ready_catalog) == ready_rights
 
@@ -108,7 +111,7 @@ def main() -> int:
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
-    invalid["mode"] = "password"
+    invalid["mode"] = "guest_only"
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
@@ -126,7 +129,20 @@ def main() -> int:
     allowed = provision["web_gateway"]["authelia"]["authentication"]["groups"]
     assert set(allowed) == set(catalog["groups"])
 
-    print("[ОК] Samba guest_only/read_write, пароли не используются, Authelia отдельно")
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / "password"
+        local = {**merged, "credential": {"path": str(path)}}
+        refuses(lambda: require_nas_smb_secret(local))
+        path.write_text("test-password\n", encoding="utf-8")
+        os.chmod(path, 0o644)
+        refuses(lambda: require_nas_smb_secret(local))
+        os.chmod(path, 0o600)
+        require_nas_smb_secret(local)
+        path.unlink()
+        path.symlink_to(Path(td) / "target")
+        refuses(lambda: require_nas_smb_secret(local))
+
+    print("[ОК] Samba named_users/read_write, пароль отдельно от Git, Authelia отдельно")
     return 0
 
 
