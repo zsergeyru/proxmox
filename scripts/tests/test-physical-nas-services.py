@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -108,12 +110,75 @@ def test_no_forced_rollback() -> None:
         refusal(lambda: backup.verify_pool("nas-data", "123"), backup.BackupError)
 
 
+
+def test_qbittorrent_failure_diagnostics() -> None:
+    """Причины Docker/systemd классифицируются, секреты не выводятся."""
+
+    # Проверка callback должна работать и без установки Ansible на машине.
+    ansible = ModuleType("ansible")
+    plugins = ModuleType("ansible.plugins")
+    base = ModuleType("ansible.plugins.callback")
+    base.CallbackBase = object
+    path = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    spec = importlib.util.spec_from_file_location("nas_test_callback", path)
+    assert spec is not None and spec.loader is not None
+    callback = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "ansible": ansible,
+        "ansible.plugins": plugins,
+        "ansible.plugins.callback": base,
+    }):
+        spec.loader.exec_module(callback)
+
+    classify = callback.CallbackModule._qbittorrent_reasons
+    for log, hint in (
+        ("Error: port is already allocated", "сетевой порт"),
+        ("manifest unknown: test", "недоступны в реестре"),
+        ("Error response: no space left on device", "недостаточно"),
+        ("lookup lscr.io: no such host", "DNS"),
+        ("Error: Cannot connect to the Docker daemon", "Docker Engine"),
+    ):
+        result = classify(log + " password=DO_NOT_LEAK_SECRET")
+        assert any(hint in item for item in result), (log, result)
+        assert all("DO_NOT_LEAK_SECRET" not in item for item in result)
+        assert all("lscr.io" not in item for item in result)
+    unknown = classify("token=DO_NOT_LEAK_SECRET")
+    assert len(unknown) == 1
+    assert "DO_NOT_LEAK_SECRET" not in unknown[0]
+
+
+def test_qbittorrent_deploy_prepares_image_safely() -> None:
+    """Не скачивать контейнер до проверки HDD, а при отказе читать журнал."""
+
+    playbook = (
+        ROOT / "automation/ansible/playbooks/configure-nas-apps.yml"
+    ).read_text(encoding="utf-8")
+    assert playbook.index("Повторно сверить точку подключения и UUID ext4") < (
+        playbook.index("Загрузить образ qBittorrent при отсутствии")
+    )
+    assert playbook.index("Загрузить образ qBittorrent при отсутствии") < (
+        playbook.index("Подключить службу qBittorrent после проверки HDD")
+    )
+    assert "when: nas_qbit_image_present.rc != 0" in playbook
+    assert "until: nas_qbit_image_pull.rc == 0" in playbook
+    assert "Прочитать журнал отказа запуска qBittorrent" in playbook
+    assert "failed_when: false" in playbook
+    assert "wipefs" not in playbook and "mkfs" not in playbook
+    unit = (
+        ROOT / "automation/ansible/templates/nas-qbittorrent.service.j2"
+    ).read_text(encoding="utf-8")
+    assert "ExecStartPre=/usr/bin/findmnt" in unit
+    assert "ConditionPathIsMountPoint=" in unit
+
+
 def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
     test_shares()
     test_backup_identifiers()
     test_no_forced_rollback()
+    test_qbittorrent_failure_diagnostics()
+    test_qbittorrent_deploy_prepares_image_safely()
     print("[ОК] Общие папки и резервирование ZFS проверены на тестовых данных")
     return 0
 
