@@ -18,8 +18,11 @@ from pathlib import Path
 
 CONFIG = Path("/etc/nas-apps/urbackup/config.json")
 STAGING = Path("/run/nas-urbackup-source")
+MOUNT = STAGING / "current"
+GUEST_SOURCE = "/backup-source/current"
+MOUNT_GUARD = "/usr/local/sbin/nas-urbackup-client-mount"
 LOCK = Path("/run/lock/nas-urbackup-snapshot.lock")
-CLIENT = "/usr/local/bin/urbackupclientctl"
+CLIENT = ("docker", "exec", "nas-urbackup-client", "urbackupclientctl")
 PREFLIGHT = "/usr/local/sbin/nas-urbackup-safe"
 
 
@@ -39,7 +42,7 @@ def run(*argv: str, timeout: int = 60) -> str:
 
 def list_backups() -> set[int]:
     # Не считаем зелёный docker/systemd доказательством резервной копии.
-    raw = run(CLIENT, "browse")
+    raw = run(*CLIENT, "browse")
     try:
         items = json.loads(raw)
     except ValueError as exc:
@@ -56,6 +59,7 @@ def main() -> int:
     with LOCK.open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         run(PREFLIGHT, "preflight")
+        run(MOUNT_GUARD, "check")
         config = json.loads(CONFIG.read_text(encoding="utf-8"))
         src = config["source_mount"]
         ds = "nas-data"
@@ -63,8 +67,9 @@ def main() -> int:
         children = run("zfs", "list", "-H", "-o", "name", "-r", ds).splitlines()
         if children != [ds]:
             raise SnapshotError("Обнаружены дочерние ZFS datasets: нужна согласованная схема")
-        if STAGING.is_symlink() or (STAGING.exists() and
-                                   os.path.ismount(str(STAGING))):
+        if MOUNT.is_symlink() or (MOUNT.exists() and
+                                  (not MOUNT.is_dir() or os.path.ismount(str(MOUNT))
+                                   or any(MOUNT.iterdir()))):
             raise SnapshotError("Временная точка ZFS уже занята — проверить прошлое задание")
         old_snapshots = run("zfs", "list", "-H", "-t", "snapshot",
                             "-o", "name", "-r", ds)
@@ -86,20 +91,32 @@ def main() -> int:
             source_snapshot = Path(src) / ".zfs" / "snapshot" / name
             if not source_snapshot.is_dir():
                 raise SnapshotError("ZFS snapshot недоступен для чтения")
-            STAGING.mkdir(mode=0o700, exist_ok=True)
-            run("mount", "--bind", str(source_snapshot), str(STAGING))
+            MOUNT.mkdir(mode=0o700, exist_ok=True)
+            run("mount", "--bind", str(source_snapshot), str(MOUNT))
             mounted = True
-            run("mount", "-o", "remount,bind,ro", str(STAGING))
-            if not os.path.ismount(str(STAGING)):
+            run("mount", "-o", "remount,bind,ro", str(MOUNT))
+            if not os.path.ismount(str(MOUNT)):
                 raise SnapshotError("Нельзя подтвердить bind-mount согласованного снимка")
+            # Verify Docker actually received the *mounted* ZFS snapshot.
+            # Directory existence alone would allow a misleading empty backup.
+            mountinfo = run("docker", "exec", "nas-urbackup-client",
+                            "cat", "/proc/self/mountinfo")
+            if not any(
+                len(fields) > 5 and fields[4] == GUEST_SOURCE
+                and "ro" in fields[5].split(",")
+                for fields in (line.split() for line in mountinfo.splitlines())
+            ):
+                raise SnapshotError(
+                    "Docker не видит read-only mount ZFS снимка: резервирование запрещено"
+                )
             # Директория клиента существует ТОЛЬКО во время жизни снимка.
             # В остальное время нет пути, из которого UrBackup мог бы
             # автоматически сохранить пустой каталог вместо файлов NAS.
-            run(CLIENT, "add-backupdir", "-n", "nas-data", "-d", str(STAGING))
+            run(*CLIENT, "add-backupdir", "-n", "nas-data", "-d", GUEST_SOURCE)
             configured = True
-            if str(STAGING) not in run(CLIENT, "list-backupdirs"):
+            if GUEST_SOURCE not in run(*CLIENT, "list-backupdirs"):
                 raise SnapshotError("Клиент не подтвердил включение пути ZFS snapshot")
-            run(CLIENT, "start", "-f", timeout=21600)
+            run(*CLIENT, "start", "-f", timeout=21600)
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 if list_backups() - previous:
@@ -118,17 +135,17 @@ def main() -> int:
                 if created:
                     return 2
             if configured:
-                run(CLIENT, "remove-backupdir", "-n", "nas-data")
+                run(*CLIENT, "remove-backupdir", "-n", "nas-data")
             if mounted:
                 # Никогда не удалять снимок, пока его читает резервная задача.
                 # При проблеме unmount (busy) оставляем снимок и сообщаем об ошибке.
                 try:
-                    run("umount", str(STAGING), timeout=90)
+                    run("umount", str(MOUNT), timeout=90)
                     mounted = False
                 except SnapshotError:
                     raise SnapshotError("Снимок занят клиентом; отказ от его удаления")
-            if not mounted and STAGING.exists():
-                STAGING.rmdir()
+            if not mounted and MOUNT.exists():
+                MOUNT.rmdir()
             if created and not mounted:
                 run("zfs", "destroy", snapshot)
 

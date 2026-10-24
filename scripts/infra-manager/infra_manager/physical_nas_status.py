@@ -66,7 +66,7 @@ def verify_nas_services(
     critical = {
         "docker.service",
         "nas-urbackup.service",
-        "urbackupclientbackend.service",
+        "nas-urbackup-client.service",
         "nas-urbackup-local.timer",
     }
     for name in (
@@ -105,6 +105,14 @@ def verify_nas_services(
     if server.returncode or server.stdout.strip() != "true":
         raise InfraManagerError("UrBackup Server на NAS не работает")
     console.ok("UrBackup Server: контейнер запущен")
+
+    client = run(
+        session.command("docker inspect --format '{{.State.Running}}' nas-urbackup-client"),
+        check=False, capture_output=True,
+    )
+    if client.returncode or client.stdout.strip() != "true":
+        raise InfraManagerError("UrBackup Client Docker на NAS не работает")
+    console.ok("UrBackup Client Docker: контейнер запущен")
 
     safety = run(
         session.command("/usr/local/sbin/nas-urbackup-safe status"),

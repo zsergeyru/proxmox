@@ -19,15 +19,24 @@ import tarfile
 CONFIG = Path("/etc/nas-apps/urbackup/config.json")
 STORE = Path("/var/lib/nas-apps/urbackup/server")
 SERVICE = "nas-urbackup.service"
+CLIENT_SERVICE = "nas-urbackup-client.service"
 NAS_BACKUP = "nas-urbackup-local.service"
 BACKUP_ROOT = Path("/etc/nas-apps/urbackup")
-PATHS = (
+SERVER_PATHS = (
     "var/lib/nas-apps/urbackup/server",
     "etc/nas-apps/urbackup/config.json",
     "etc/nas-apps/urbackup/compose.yml",
     "etc/nas-apps/urbackup/admin-password",
     "etc/nas-apps/urbackup/initialized",
 )
+CLIENT_PATHS = (
+    "var/lib/nas-apps/urbackup/client",
+    "var/lib/nas-apps/urbackup/client/data",
+    "var/lib/nas-apps/urbackup/client/config",
+    "etc/nas-apps/urbackup/client-compose.yml",
+    "etc/nas-apps/urbackup/client-defaults",
+)
+PATHS = SERVER_PATHS + CLIENT_PATHS
 
 
 class RecoveryError(Exception):
@@ -98,9 +107,15 @@ def check_archive(archive: Path, expected: str) -> None:
         raise RecoveryError("Архив состояния невозможно прочитать") from exc
     if not any(name == PATHS[0] or name.startswith(PATHS[0] + "/") for name in names):
         raise RecoveryError("В архиве отсутствует состояние UrBackup Server")
-    for item in PATHS[1:]:
+    for item in SERVER_PATHS[1:]:
         if item not in names:
             raise RecoveryError("В архиве не хватает служебного файла UrBackup")
+    # Earlier unencrypted tar archives may contain server state only.
+    # If the archive includes any client state, all must be present.
+    if any(item in names for item in CLIENT_PATHS):
+        for item in CLIENT_PATHS:
+            if item not in names:
+                raise RecoveryError("Неполный архив состояния Docker-клиента")
 
 
 def verify() -> None:
@@ -140,9 +155,12 @@ def backup() -> None:
         raise RecoveryError("Архив этого запуска уже существует")
 
     stop_attempted = False
+    client_was_active = is_active(CLIENT_SERVICE)
     failed = None
     try:
         stop_attempted = True
+        if client_was_active:
+            cmd("systemctl", "stop", CLIENT_SERVICE)
         cmd("systemctl", "stop", SERVICE)
         fd = os.open(str(partial), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
@@ -178,6 +196,10 @@ def backup() -> None:
                 cmd("systemctl", "start", SERVICE, timeout=180)
                 if not is_active(SERVICE):
                     raise RecoveryError("UrBackup не запустился после копирования состояния")
+                if client_was_active:
+                    cmd("systemctl", "start", CLIENT_SERVICE, timeout=180)
+                    if not is_active(CLIENT_SERVICE):
+                        raise RecoveryError("Docker-клиент не запустился после сохранения состояния")
             except RecoveryError as exc:
                 failed = exc if failed is None else RecoveryError(
                     str(failed) + "; также не удалось запустить UrBackup"
