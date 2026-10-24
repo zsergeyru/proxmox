@@ -91,7 +91,7 @@ def prompt_nas_smb_password(name: str, forward, error_type: type[Exception]) -> 
         raise error_type("Пароль Samba задаётся при deploy nas в терминале PVE")
     password = getpass.getpass("Общий пароль Samba для всех пользователей: ")
     if (not 4 <= len(password) <= 128
-            or any(character in password for character in ("\\n", "\\r", "\\x00"))):
+            or any(character in password for character in ("\n", "\r", "\x00"))):
         raise error_type("Пароль Samba: требуется одна строка длиной от 4 до 128 символов")
     payload = json.dumps({"password": password}, ensure_ascii=False) + "\n"
     del password
