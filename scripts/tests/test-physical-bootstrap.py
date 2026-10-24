@@ -398,7 +398,7 @@ def test_pve_smb_password_prompt() -> None:
     assert not calls
     with (
         patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
-        patch.object(password_prompt.getpass, "getpass", return_value="bad\\npassword"),
+        patch.object(password_prompt.getpass, "getpass", return_value="bad\npassword"),
     ):
         expect_refusal(
             lambda: password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError),
@@ -412,10 +412,10 @@ def test_pve_smb_password_prompt() -> None:
         ) == 0
     store.assert_called_once_with("test-credential")
     expect_refusal(
-        lambda: operator.operator_nas_smb_password_set("other", '{"password":"test"}\\n'),
+        lambda: operator.operator_nas_smb_password_set("other", '{"password":"test"}\n'),
     )
     expect_refusal(
-        lambda: operator.operator_nas_smb_password_set("nas", '{"password":"test","other":1}\\n'),
+        lambda: operator.operator_nas_smb_password_set("nas", '{"password":"test","other":1}\n'),
     )
 
 
