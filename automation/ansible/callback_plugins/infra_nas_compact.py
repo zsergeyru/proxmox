@@ -288,6 +288,35 @@ class CallbackModule(CallbackBase):
             self._display.display(f"[ОШИБКА] Код возврата: {rc}")
         if task == "Прервать настройку из-за ошибки обновления APT":
             return
+        if task == "Зарегистрировать папки и ресурсы через базу OMV":
+            # Скрипт печатает только фиксированную стадию и код возврата.
+            # Сырые stderr/stdout OMV (включая возможные секреты) скрываем.
+            stage_match = re.search(
+                r"NAS_SMB_STEP=(read-folders|read-shares|read-settings|"
+                r"create-folder|create-share|enable-smb|apply-samba|unknown) "
+                r"RC=([0-9]{1,3})", output,
+            )
+            descriptions = {
+                "read-folders": "Не удалось прочитать список общих папок OMV",
+                "read-shares": "Не удалось прочитать SMB-ресурсы OMV",
+                "read-settings": "Не удалось прочитать общие настройки SMB",
+                "create-folder": "OMV отказала в регистрации новой общей папки",
+                "create-share": "OMV отказала в регистрации нового SMB-ресурса",
+                "enable-smb": "OMV отказала при включении службы Samba",
+                "apply-samba": "Не удалось применить настройки Samba через omv-salt",
+                "unknown": "Неизвестный этап обработки SMB",
+            }
+            if stage_match:
+                self._display.display(
+                    "[ПРИЧИНА] " + descriptions[stage_match.group(1)] +
+                    " (код " + stage_match.group(2) + ")"
+                )
+            else:
+                self._display.display(
+                    "[ПРИЧИНА] Регистрация SMB прервана из-за ошибки "
+                    "модели OMV, существующего конфликта или неподтверждённого пути"
+                )
+            return
         if task == "Загрузить образ qBittorrent при отсутствии":
             for reason in self._qbittorrent_reasons(
                 " ".join(str(data.get(field, "")) for field in ("msg", "stderr", "stdout"))
