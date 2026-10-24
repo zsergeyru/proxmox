@@ -246,9 +246,30 @@ def test_nas_smb_password_only_in_trusted_status() -> None:
         read_secret.assert_called_once()
 
 
+def test_generic_physical_host_boundary() -> None:
+    """Nothing in the physical-host controller depends on specific services."""
+    core = ROOT / "scripts/infra-manager/infra_manager"
+    for name in (
+        "operator.py", "physical_hosts.py", "physical_host_operations.py",
+        "physical_host_credentials.py",
+    ):
+        content = (core / name).read_text(encoding="utf-8").lower()
+        for forbidden in ("smb-password-set", "physical_nas_", "run_nas_phase", "omv8"):
+            assert forbidden not in content, (name, forbidden)
+    thin_host = (ROOT / "scripts/infra-manager/host/manager.py").read_text()
+    assert "prompt_nas_smb_password" not in thin_host
+    assert "prompt_physical_credentials" not in thin_host
+    assert "prepare_physical_host" in thin_host
+    assert (ROOT / "scripts/infra-manager/drivers/omv8.py").is_file()
+    manifest = yaml.safe_load((ROOT / "infrastructure/hosts/nas/operator.yaml").read_text())
+    assert manifest["credentials"][0]["id"] == "smb"
+    assert manifest["credentials"][0]["status"]["title"] == "Samba (SMB)"
+
+
 if __name__ == "__main__":
     test_provision_and_fail_closed_phases()
     test_role_and_no_application_specific_deploy_in_python()
     test_shared_status_parser_and_secret_control()
     test_nas_smb_password_only_in_trusted_status()
+    test_generic_physical_host_boundary()
     print("[ОК] NAS declarative deploy/status/credentials")
