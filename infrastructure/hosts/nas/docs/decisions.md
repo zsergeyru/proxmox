@@ -99,4 +99,5 @@ NAS продолжает работать независимо от Proxmox; Inf
 
 - [storage.md](storage.md) — технические ограничения.
 - [services.md](services.md) — выбранные службы.
+- [backup.md](backup.md) — требуемое устройство и восстановление UrBackup на NAS.
 - [operations.md](operations.md) — порядок обслуживания.
