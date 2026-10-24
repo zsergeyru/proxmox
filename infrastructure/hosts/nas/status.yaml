@@ -21,16 +21,16 @@ checks:
     message: Планировщик копий NAS запущен
   - type: docker
     container: nas-urbackup
-    message: UrBackup Server: контейнер запущен
+    message: "UrBackup Server: контейнер запущен"
   - type: docker
     container: nas-urbackup-client
-    message: UrBackup Client: контейнер запущен
+    message: "UrBackup Client: контейнер запущен"
   - type: docker
     container: nas-qbittorrent
-    message: qBittorrent: контейнер запущен
+    message: "qBittorrent: контейнер запущен"
   - type: tcp
     port: 8080
-    message: qBittorrent: веб-интерфейс доступен
+    message: "qBittorrent: веб-интерфейс доступен"
   - type: file
     path: /etc/nas-apps/urbackup/initialized
     message: Администратор UrBackup инициализирован
