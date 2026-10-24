@@ -188,17 +188,17 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         assert resources[0]["guest"] == "only" and resources[0]["readonly"] is False
         assert len(salt_deploys) == 2
         writes = len(updates)
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, GUEST)
         assert len(updates) == writes
         assert len(salt_deploys) == 2
         # Частично записанное состояние при повторе не создаёт чужие записи.
         resources.pop()
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, GUEST)
         assert len(resources) == 4
         assert len(salt_deploys) == 3
         # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
         settings["enable"] = False
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, GUEST)
         assert len(resources) == 4
         assert len(salt_deploys) == 4
 
