@@ -110,6 +110,26 @@ jobs:
       - name: Check NAS UrBackup policy, ZFS guards and deployment
         run: python scripts/tests/test-nas-urbackup.py
 
+      - name: Smoke-test official UrBackup Docker client in isolated CI container
+        run: |
+          set -euo pipefail
+          docker pull uroni/urbackup-client:2.5.31
+          docker run --rm --entrypoint /bin/sh uroni/urbackup-client:2.5.31 \
+            -c 'test -x /usr/local/sbin/urbackupclientbackend && command -v urbackupclientctl'
+          docker run -d --name nas-client-ci-smoke \
+            --entrypoint /usr/local/sbin/urbackupclientbackend \
+            uroni/urbackup-client:2.5.31
+          trap 'docker rm -f nas-client-ci-smoke >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 20); do
+            if docker exec nas-client-ci-smoke urbackupclientctl status >/dev/null 2>&1; then
+              docker inspect -f '{{.State.Running}}' nas-client-ci-smoke | grep -Fx true
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs --tail 40 nas-client-ci-smoke 2>&1
+          exit 1
+
       - name: Check common users, NAS rights and Authelia groups
         run: python scripts/tests/test-physical-nas-users.py
 
