@@ -1,0 +1,36 @@
+# Shared status contract, adapted to a physical host identity.
+# Disk identity/UUID/GUID and ZFS safety are checked independently before
+# any declared app checks; no backup success claims here.
+schema_version: 2
+host: nas
+checks:
+  - type: systemd
+    unit: docker.service
+    message: Docker работает
+  - type: systemd
+    unit: smbd.service
+    message: Samba работает
+  - type: systemd
+    unit: nas-urbackup.service
+    message: UrBackup Server запущен
+  - type: systemd
+    unit: nas-urbackup-client.service
+    message: UrBackup Client запущен
+  - type: systemd
+    unit: nas-urbackup-local.timer
+    message: Планировщик копий NAS запущен
+  - type: docker
+    container: nas-urbackup
+    message: UrBackup Server: контейнер запущен
+  - type: docker
+    container: nas-urbackup-client
+    message: UrBackup Client: контейнер запущен
+  - type: docker
+    container: nas-qbittorrent
+    message: qBittorrent: контейнер запущен
+  - type: tcp
+    port: 8080
+    message: qBittorrent: веб-интерфейс доступен
+  - type: file
+    path: /etc/nas-apps/urbackup/initialized
+    message: Администратор UrBackup инициализирован
