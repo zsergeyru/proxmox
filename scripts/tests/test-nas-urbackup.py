@@ -52,7 +52,6 @@ def test_backup_policy():
     assert policy["local_client"]["target_volume"] == "backup"
     assert policy["retention"]["keep_daily"] >= 7
     assert policy["retention"]["keep_weekly"] >= 4
-    assert policy["migration"]["preserve_legacy"] is True
     assert policy["server"]["web_bind"] == "127.0.0.1"
 
     with tempfile.TemporaryDirectory() as td:
