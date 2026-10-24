@@ -103,6 +103,14 @@ def main() -> int:
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
     invalid = copy.deepcopy(ready_rights)
+    del invalid["shares"]["music"]
+    refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
+
+    invalid = copy.deepcopy(ready_rights)
+    invalid["shares"]["rogue"] = {"read_groups": [], "write_groups": []}
+    refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
+
+    invalid = copy.deepcopy(ready_rights)
     invalid["users"] = ready_catalog["users"]
     refuses(lambda: validate_nas_access(ROOT, invalid, ready_catalog))
 
