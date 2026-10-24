@@ -9,19 +9,59 @@
       - nas_shared_uuid | length > 4
     fail_msg: Нет подтверждённых ссылок на файловые системы OMV
 
-- name: Подтвердить гостевую политику SMB
+- name: Подтвердить политику Samba с обязательной авторизацией
   ansible.builtin.assert:
     that:
-      - nas_access_policy.schema_version == 2
-      - nas_access_policy.mode == 'guest_only'
+      - nas_access_policy.schema_version == 3
+      - nas_access_policy.mode == 'named_users'
+      - nas_access_policy.credential.source == 'controller_file'
+      - nas_access_policy.credential.path == '/mnt/persistent-state/physical-hosts/nas-smb-password'
+      - nas_access_policy.users | length > 0
       - nas_access_policy.shares.keys() | list | sort == nas_provision.shares | map(attribute='name') | list | sort
       - nas_access_policy.shares.values() | map(attribute='access') | unique | list == ['read_write']
-    fail_msg: Нужны явные разрешения гостю на чтение и запись всех SMB-папок
+    fail_msg: SMB требует пользователей и защищённый пароль контроллера, без гостевого входа
 
-- name: Проверить учётную запись Samba guest
+- name: Создать общую группу доступа Samba
+  ansible.builtin.group:
+    name: nas-smb
+    system: true
+
+- name: Обнаружить существующие учётные записи без изменений
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Создать только отсутствующих пользователей для Samba
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    group: users
+    groups: nas-smb
+    create_home: false
+    shell: /usr/sbin/nologin
+    password_lock: true
+    state: present
+  loop: "{{ nas_access_policy.users }}"
+  when: item.name not in ansible_facts.getent_passwd
+
+- name: Добавить ранее существующих пользователей в группу NAS без сброса их настроек
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    groups: nas-smb
+    append: true
+  loop: "{{ nas_access_policy.users }}"
+  when: item.name in ansible_facts.getent_passwd
+
+# The password never appears in Git, Ansible extra-vars, command arguments or
+# callback logs. Samba accepts passwords via stdin; no shell interpolation.
+- name: Установить общий пароль Samba для объявленных пользователей
   ansible.builtin.command:
-    argv: [id, -u, nobody]
-  changed_when: false
+    argv: [smbpasswd, -s, -a, "{{ item.name }}"]
+    stdin: |
+      {{ lookup('ansible.builtin.file', nas_access_policy.credential.path) | trim }}
+      {{ lookup('ansible.builtin.file', nas_access_policy.credential.path) | trim }}
+    stdin_add_newline: false
+  loop: "{{ nas_access_policy.users }}"
+  no_log: true
+  changed_when: true
 
 - name: Повторно проверить подключение общего HDD по UUID
   ansible.builtin.command:
@@ -38,19 +78,18 @@
     path: "{{ (nas_shared_mount if item.volume == 'shared' else nas_data_mountpoint) ~ '/' ~ item.directory }}"
     state: directory
     owner: root
-    group: users
-    mode: "0770"
+    group: nas-smb
+    mode: "2770"
   loop: "{{ nas_provision.shares }}"
 
-# Nobody is the system identity of an anonymous Samba connection. Grant
-# POSIX permissions on declared share roots only, never on the backup pool.
-# Inherited ACL applies to new children; existing nested ACLs are preserved.
-- name: Разрешить гостю чтение и запись объявленных SMB-каталогов
+# ACL applies only to the four verified share roots. Existing nested ACLs
+# and files are not recursively modified by deployment.
+- name: Назначить группе Samba полные права и наследование для новых файлов
   ansible.builtin.command:
     argv:
       - setfacl
       - -m
-      - u:nobody:rwx,d:u:nobody:rwx
+      - g:nas-smb:rwx,m::rwx,d:g:nas-smb:rwx,d:m::rwx
       - --
       - "{{ (nas_shared_mount if item.volume == 'shared' else nas_data_mountpoint) ~ '/' ~ item.directory }}"
   loop: "{{ nas_provision.shares }}"
