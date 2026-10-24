@@ -19,7 +19,10 @@ from infra_manager.common import InfraManagerError
 from infra_manager.user_catalog import load_user_catalog, validate_user_catalog
 from infra_manager.physical_nas_users import (
     load_nas_users, require_nas_users_configured, require_nas_smb_secret,
-    store_nas_smb_secret, validate_nas_access,
+    validate_nas_access,
+)
+from infra_manager.physical_host_credentials import (
+    operator_declarations, credential_plan, save_operator_secret, read_operator_secret,
 )
 
 
@@ -144,24 +147,29 @@ def main() -> int:
         path.symlink_to(Path(td) / "target")
         refuses(lambda: require_nas_smb_secret(local))
 
+    contract = operator_declarations(ROOT, "nas")
+    assert contract["credentials"][0]["id"] == "smb"
+    assert credential_plan(ROOT, "nas")["credentials"][0]["prompt"]
+    assert merged["credential"]["path"].endswith("/nas-smb-password")
+
     with tempfile.TemporaryDirectory() as td:
         state = Path(td)
         destination = state / "nas-smb-password"
         with patch("os.fchown") as chown:
-            store_nas_smb_secret("example-123", directory=state)
+            save_operator_secret(ROOT, "nas", "smb", "example-123", state_root=state)
             chown.assert_called_once()
         assert destination.stat().st_mode & 0o777 == 0o600
         assert destination.read_text(encoding="utf-8") == "example-123\n"
-        local = {**merged, "credential": {"path": str(destination)}}
-        assert require_nas_smb_secret(local) == "example-123"
+        assert read_operator_secret(ROOT, "nas", "smb", state_root=state) == "example-123"
         with patch("os.fchown"):
-            store_nas_smb_secret("next-secret", directory=state)
-        assert require_nas_smb_secret(local) == "next-secret"
-        refuses(lambda: store_nas_smb_secret("bad\npass", directory=state))
-        assert require_nas_smb_secret(local) == "next-secret"
+            save_operator_secret(ROOT, "nas", "smb", "next-secret", state_root=state)
+        assert read_operator_secret(ROOT, "nas", "smb", state_root=state) == "next-secret"
+        refuses(lambda: save_operator_secret(ROOT, "nas", "smb", "bad\npass", state_root=state))
+        refuses(lambda: save_operator_secret(ROOT, "nas", "undeclared", "hello", state_root=state))
+        assert read_operator_secret(ROOT, "nas", "smb", state_root=state) == "next-secret"
         destination.unlink()
         destination.symlink_to(state / "another-file")
-        refuses(lambda: store_nas_smb_secret("valid-pass", directory=state))
+        refuses(lambda: save_operator_secret(ROOT, "nas", "smb", "valid-pass", state_root=state))
 
     print("[ОК] Samba named_users/read_write, пароль отдельно от Git, Authelia отдельно")
     return 0
