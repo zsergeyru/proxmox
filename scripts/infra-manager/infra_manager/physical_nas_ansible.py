@@ -125,6 +125,7 @@ def configure_nas_urbackup(
         "nas_backup_mountpoint": backup_mountpoint,
         "nas_urbackup_image": policy["server"]["image"],
         "nas_urbackup_timezone": policy["server"]["timezone"],
+        "nas_urbackup_recovery_schedule": policy["retention"]["server_state_schedule"],
     })
 
 
