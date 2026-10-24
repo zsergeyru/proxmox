@@ -1,7 +1,7 @@
 """Доступ NAS по SMB: общий каталог людей и локальные разрешения папок.
 
 Имена и группы объявлены единожды в infrastructure/users.yaml.
-SMB включён без паролей в гостевом режиме; доступ задан в access.yaml.
+SMB uses named user accounts and one protected controller-side password.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def validate_nas_access(
     repo_root: Path, document: object,
     catalog: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Проверить объявленный гостевой доступ ко всем SMB-папкам."""
+    """Проверить авторизованный доступ именованных пользователей к SMB-папкам."""
 
     if catalog is None:
         catalog = load_user_catalog(repo_root)
@@ -43,8 +43,10 @@ def validate_nas_access(
         raise InfraManagerError(
             "Назначения access.yaml не совпадают с папками provision.yaml"
         )
-    # Guest-only resources deliberately don't authenticate named users.
-    # A password or per-user permission block fails the strict JSON schema.
+    if not catalog["users"]:
+        raise InfraManagerError("Нет пользователей Samba в infrastructure/users.yaml")
+    # The credential path is strictly constrained by the schema and does not
+    # embed the actual password in the public repository.
     return document
 
 
@@ -61,6 +63,7 @@ def load_nas_users(repo_root: Path) -> dict[str, object]:
     return {
         "schema_version": rights["schema_version"],
         "mode": rights["mode"],
+        "credential": rights["credential"],
         "users": catalog["users"],
         "groups": catalog["groups"],
         "shares": rights["shares"],
@@ -68,12 +71,31 @@ def load_nas_users(repo_root: Path) -> dict[str, object]:
 
 
 def require_nas_users_configured(repo_root: Path) -> dict[str, object]:
-    """Не считать SMB готовым при отсутствии согласованных людей и прав."""
+    """Подтвердить имена и права до развёртывания SMB."""
 
     document = load_nas_users(repo_root)
     if not document["shares"] or any(
         rights["access"] != "read_write"
         for rights in document["shares"].values()
     ):
-        raise InfraManagerError("Все SMB-папки NAS должны быть доступны гостю на запись")
+        raise InfraManagerError("Все SMB-папки NAS должны быть доступны по учётным записям")
     return document
+
+def require_nas_smb_secret(document: dict[str, object]) -> None:
+    """Fail before deployment if the trusted controller secret is missing."""
+    import stat
+    path = Path(document["credential"]["path"])
+    if path.is_symlink() or not path.is_file():
+        raise InfraManagerError(
+            "Не задан защищённый пароль Samba на 910; "
+            "создайте /mnt/persistent-state/physical-hosts/nas-smb-password (0600)"
+        )
+    try:
+        info = path.stat()
+        password = path.read_text(encoding="utf-8").rstrip("\\n")
+    except (OSError, UnicodeError) as exc:
+        raise InfraManagerError("Не удалось проверить пароль Samba на 910") from exc
+    if (info.st_mode & 0o077 or not stat.S_ISREG(info.st_mode)
+            or not 4 <= len(password) <= 128
+            or any(c in password for c in ("\\n", "\\r", "\\x00"))):
+        raise InfraManagerError("Файл пароля Samba повреждён или недостаточно защищён (0600)")
