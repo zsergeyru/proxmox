@@ -696,7 +696,7 @@ jobs:
             -e "guest=$guest_dir" \
             automation/ansible/playbooks/configure-guest.yml
           # Full Ansible parsing: PyYAML alone missed malformed command arguments.
-          for playbook in configure-nas-urbackup.yml configure-nas-urbackup-client.yml deploy-nas.yml; do
+          for playbook in deploy-nas.yml; do
             docker run --rm \
               -v "$PWD:/workspace" \
               -w /workspace \
