@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -17,7 +18,8 @@ sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
 from infra_manager.common import InfraManagerError
 from infra_manager.user_catalog import load_user_catalog, validate_user_catalog
 from infra_manager.physical_nas_users import (
-    load_nas_users, require_nas_users_configured, require_nas_smb_secret, validate_nas_access,
+    load_nas_users, require_nas_users_configured, require_nas_smb_secret,
+    store_nas_smb_secret, validate_nas_access,
 )
 
 
@@ -141,6 +143,25 @@ def main() -> int:
         path.unlink()
         path.symlink_to(Path(td) / "target")
         refuses(lambda: require_nas_smb_secret(local))
+
+    with tempfile.TemporaryDirectory() as td:
+        state = Path(td)
+        destination = state / "nas-smb-password"
+        with patch("os.fchown") as chown:
+            store_nas_smb_secret("example-123", directory=state)
+            chown.assert_called_once()
+        assert destination.stat().st_mode & 0o777 == 0o600
+        assert destination.read_text(encoding="utf-8") == "example-123\n"
+        local = {**merged, "credential": {"path": str(destination)}}
+        assert require_nas_smb_secret(local) == "example-123"
+        with patch("os.fchown"):
+            store_nas_smb_secret("next-secret", directory=state)
+        assert require_nas_smb_secret(local) == "next-secret"
+        refuses(lambda: store_nas_smb_secret("bad\npass", directory=state))
+        assert require_nas_smb_secret(local) == "next-secret"
+        destination.unlink()
+        destination.symlink_to(state / "another-file")
+        refuses(lambda: store_nas_smb_secret("valid-pass", directory=state))
 
     print("[ОК] Samba named_users/read_write, пароль отдельно от Git, Authelia отдельно")
     return 0

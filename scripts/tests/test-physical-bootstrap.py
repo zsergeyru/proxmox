@@ -371,6 +371,54 @@ def test_pve_password_transport() -> None:
     assert all(command != ["ssh-trust-confirm", "nas"] for command, _ in calls)
 
 
+def test_pve_smb_password_prompt() -> None:
+    """PVE asks without echo and forwards the secret only via stdin."""
+    calls = []
+
+    def forward(argv, *, input_text=None):
+        calls.append((argv, input_text))
+        return 0
+
+    with (
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch.object(password_prompt.getpass, "getpass", return_value="test-credential") as getpass,
+    ):
+        assert password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError) == 0
+        getpass.assert_called_once()
+    assert len(calls) == 1
+    assert calls[0][0] == ["smb-password-set", "nas"]
+    assert json.loads(calls[0][1]) == {"password": "test-credential"}
+    assert "test-credential" not in repr(calls[0][0])
+    calls.clear()
+    with patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: False)):
+        expect_refusal(
+            lambda: password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError),
+            host.OperatorError,
+        )
+    assert not calls
+    with (
+        patch.object(password_prompt.sys, "stdin", SimpleNamespace(isatty=lambda: True)),
+        patch.object(password_prompt.getpass, "getpass", return_value="bad\npassword"),
+    ):
+        expect_refusal(
+            lambda: password_prompt.prompt_nas_smb_password("nas", forward, host.OperatorError),
+            host.OperatorError,
+        )
+    assert not calls
+
+    with patch("infra_manager.physical_nas_users.store_nas_smb_secret") as store:
+        assert operator.operator_nas_smb_password_set(
+            "nas", json.dumps({"password": "test-credential"}) + "\n",
+        ) == 0
+    store.assert_called_once_with("test-credential")
+    expect_refusal(
+        lambda: operator.operator_nas_smb_password_set("other", '{"password":"test"}\n'),
+    )
+    expect_refusal(
+        lambda: operator.operator_nas_smb_password_set("nas", '{"password":"test","other":1}\n'),
+    )
+
+
 def main() -> int:
     """Проверить контракт до испытаний на реальном NAS."""
 
@@ -381,6 +429,7 @@ def main() -> int:
     test_repeat_trust_requires_exact_scanned_key()
     test_initial_root_without_sudo()
     test_pve_password_transport()
+    test_pve_smb_password_prompt()
     print("[ОК] Первый SSH-доступ NAS проверен на испытательных данных")
     return 0
 

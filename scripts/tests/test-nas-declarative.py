@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import sys
 import tempfile
 from pathlib import Path
@@ -15,7 +17,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_nas_status import load_nas_status, _load_nas_status_document
+from infra_manager.physical_nas_status import (
+    load_nas_status, _load_nas_status_document, show_nas_status,
+)
 from infra_manager.physical_nas_ansible import load_nas_provision, run_nas_phase
 from infra_manager.guest_status import (
     load_declared_checks, _run_declared_check, _service_fields,
@@ -208,8 +212,40 @@ def test_shared_status_parser_and_secret_control() -> None:
     assert ("Логин", "admin") in trusted
 
 
+def test_nas_smb_password_only_in_trusted_status() -> None:
+    """The shared password is mandatory in trusted status, hidden elsewhere."""
+    config = copy.deepcopy(load_nas_provision(ROOT))
+    config["services"] = {}
+    session = SimpleNamespace(host=SimpleNamespace(name="nas", address="192.0.2.12"))
+    with (
+        patch("infra_manager.physical_nas_status.project_branch_for_checkout", return_value="main"),
+        patch("infra_manager.physical_nas_status.current_project_revision", return_value="test"),
+        patch("infra_manager.physical_nas_users.require_nas_smb_secret",
+              return_value="unit-test-secret") as read_secret,
+    ):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            show_nas_status(ROOT, session, config, show_secrets=False)
+        assert "Samba (SMB)" in output.getvalue()
+        assert "sergey, sveta, danya" in output.getvalue()
+        assert "скрыт" in output.getvalue()
+        assert "unit-test-secret" not in output.getvalue()
+        read_secret.assert_not_called()
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            show_nas_status(ROOT, session, config, show_secrets=True)
+        assert "unit-test-secret" in output.getvalue()
+        assert "shared" in output.getvalue()
+        assert "movies" in output.getvalue()
+        assert "music" in output.getvalue()
+        assert "data" in output.getvalue()
+        read_secret.assert_called_once()
+
+
 if __name__ == "__main__":
     test_provision_and_fail_closed_phases()
     test_role_and_no_application_specific_deploy_in_python()
     test_shared_status_parser_and_secret_control()
+    test_nas_smb_password_only_in_trusted_status()
     print("[ОК] NAS declarative deploy/status/credentials")
