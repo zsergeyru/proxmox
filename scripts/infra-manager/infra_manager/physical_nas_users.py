@@ -92,10 +92,10 @@ def require_nas_smb_secret(document: dict[str, object]) -> None:
         )
     try:
         info = path.stat()
-        password = path.read_text(encoding="utf-8").rstrip("\\n")
+        password = path.read_text(encoding="utf-8").rstrip("\n")
     except (OSError, UnicodeError) as exc:
         raise InfraManagerError("Не удалось проверить пароль Samba на 910") from exc
     if (info.st_mode & 0o077 or not stat.S_ISREG(info.st_mode)
             or not 4 <= len(password) <= 128
-            or any(c in password for c in ("\\n", "\\r", "\\x00"))):
+            or any(c in password for c in ("\n", "\r", "\x00"))):
         raise InfraManagerError("Файл пароля Samba повреждён или недостаточно защищён (0600)")
