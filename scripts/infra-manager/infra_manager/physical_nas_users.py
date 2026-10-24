@@ -1,7 +1,7 @@
 """Доступ NAS по SMB: общий каталог людей и локальные разрешения папок.
 
 Имена и группы объявлены единожды в infrastructure/users.yaml.
-Права четырёх сетевых папок задаёт только NAS в access.yaml.
+SMB включён без паролей в гостевом режиме; доступ задан в access.yaml.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ def validate_nas_access(
     repo_root: Path, document: object,
     catalog: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    """Проверить права только на группы из общего каталога."""
+    """Проверить объявленный гостевой доступ ко всем SMB-папкам."""
 
     if catalog is None:
         catalog = load_user_catalog(repo_root)
@@ -38,21 +38,13 @@ def validate_nas_access(
         field = ".".join(map(str, error.path)) or "access.yaml"
         raise InfraManagerError(f"NAS access.yaml: {field}: {error.message}")
     assert isinstance(document, dict)
-    known_groups = set(catalog["groups"])
     declared = {share["name"] for share in load_nas_provision(repo_root)["shares"]}
     if set(document["shares"]) != declared:
         raise InfraManagerError(
             "Назначения access.yaml не совпадают с папками provision.yaml"
         )
-    for share in sorted(declared):
-        rights = document["shares"][share]
-        unknown = (
-            set(rights["read_groups"]) | set(rights["write_groups"])
-        ) - known_groups
-        if unknown:
-            raise InfraManagerError(
-                f"Папка NAS {share}: неизвестные общие группы: {sorted(unknown)}"
-            )
+    # Guest-only resources deliberately don't authenticate named users.
+    # A password or per-user permission block fails the strict JSON schema.
     return document
 
 
@@ -78,15 +70,9 @@ def require_nas_users_configured(repo_root: Path) -> dict[str, object]:
     """Не считать SMB готовым при отсутствии согласованных людей и прав."""
 
     document = load_nas_users(repo_root)
-    if not document["users"]:
-        raise InfraManagerError(
-            "Укажите пользователей в infrastructure/users.yaml до настройки SMB"
-        )
-    if not any(
-        rights["read_groups"] or rights["write_groups"]
+    if not document["shares"] or any(
+        rights["access"] != "read_write"
         for rights in document["shares"].values()
     ):
-        raise InfraManagerError(
-            "Назначьте права в infrastructure/hosts/nas/access.yaml"
-        )
+        raise InfraManagerError("Все SMB-папки NAS должны быть доступны гостю на запись")
     return document
