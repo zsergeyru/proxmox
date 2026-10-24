@@ -5,7 +5,7 @@ schema_version: 3
 mode: named_users
 credential:
   source: controller_file
-  path: /mnt/persistent-state/physical-hosts/nas-smb-password
+  path: /var/lib/infra-manager/physical-hosts/nas-smb-password
 shares:
   shared: {access: read_write}
   movies: {access: read_write}
