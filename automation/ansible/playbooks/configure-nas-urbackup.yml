@@ -20,7 +20,8 @@
         fail_msg: Недостоверная политика резервирования NAS
 
     - name: Проверить наличие Docker
-      ansible.builtin.command: [docker, compose, version]
+      ansible.builtin.command:
+        argv: [docker, compose, version]
       changed_when: false
 
     - name: Создать пользователя сервера UrBackup
@@ -37,12 +38,14 @@
         shell: /usr/sbin/nologin
 
     - name: Получить идентификатор пользователя
-      ansible.builtin.command: [id, -u, nas-urbackup]
+      ansible.builtin.command:
+        argv: [id, -u, nas-urbackup]
       register: nas_urbackup_uid
       changed_when: false
 
     - name: Получить идентификатор группы
-      ansible.builtin.command: [id, -g, nas-urbackup]
+      ansible.builtin.command:
+        argv: [id, -g, nas-urbackup]
       register: nas_urbackup_gid
       changed_when: false
 
@@ -79,7 +82,8 @@
           } | to_nice_json }}
 
     - name: Проверить GUID и реальные точки подключения до записи
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, preflight]
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/nas-urbackup-safe, preflight]
       changed_when: false
 
     - name: Подготовить только собственные каталоги состояния NAS
@@ -127,7 +131,8 @@
       register: nas_urbackup_compose
 
     - name: Подготовить резервные папки строго на проверенном ZFS
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, prepare]
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/nas-urbackup-safe, prepare]
       changed_when: false
 
     - name: Проверить Docker Compose перед запуском
@@ -150,7 +155,8 @@
       changed_when: nas_urbackup_pulled.rc == 0
 
     - name: Инициализировать закрытого администратора до открытия сервера
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, init-admin]
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/nas-urbackup-safe, init-admin]
       no_log: true
       changed_when: false
 
@@ -202,5 +208,6 @@
         state: started
 
     - name: Подтвердить закрытый локальный статус
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, status]
+      ansible.builtin.command:
+        argv: [/usr/local/sbin/nas-urbackup-safe, status]
       changed_when: false
