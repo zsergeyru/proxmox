@@ -16,7 +16,7 @@ def run_nas_playbook(
 ) -> None:
     """Запустить разрешённый сценарий с теми же временными SSH-полномочиями."""
 
-    if name not in {"configure-nas.yml", "configure-nas-apps.yml", "configure-nas-backup.yml", "configure-nas-urbackup.yml", "configure-nas-smb.yml"}:
+    if name not in {"configure-nas.yml", "configure-nas-apps.yml", "configure-nas-backup.yml", "configure-nas-urbackup.yml", "configure-nas-urbackup-client.yml", "configure-nas-smb.yml"}:
         raise InfraManagerError("Неизвестный сценарий настройки NAS")
     target = session.host
     if not target.address:
@@ -125,6 +125,20 @@ def configure_nas_urbackup(
         "nas_backup_mountpoint": backup_mountpoint,
         "nas_urbackup_image": policy["server"]["image"],
         "nas_urbackup_timezone": policy["server"]["timezone"],
+    })
+
+
+
+def configure_nas_urbackup_local(
+    repo_root: Path, session: PhysicalHostSshSession,
+    *, data_mountpoint: str, backup_mountpoint: str,
+    policy: dict[str, object],
+) -> None:
+    """Задание NAS: Linux-клиент и снимок ZFS по расписанию."""
+    run_nas_playbook(repo_root, session, "configure-nas-urbackup-client.yml", {
+        "nas_data_mountpoint": data_mountpoint,
+        "nas_backup_mountpoint": backup_mountpoint,
+        "nas_urbackup_schedule": policy["local_client"]["schedule"],
     })
 
 
