@@ -151,13 +151,13 @@ def main() -> int:
             store_nas_smb_secret("example-123", directory=state)
             chown.assert_called_once()
         assert destination.stat().st_mode & 0o777 == 0o600
-        assert destination.read_text(encoding="utf-8") == "example-123\\n"
+        assert destination.read_text(encoding="utf-8") == "example-123\n"
         local = {**merged, "credential": {"path": str(destination)}}
         assert require_nas_smb_secret(local) == "example-123"
         with patch("os.fchown"):
             store_nas_smb_secret("next-secret", directory=state)
         assert require_nas_smb_secret(local) == "next-secret"
-        refuses(lambda: store_nas_smb_secret("bad\\npass", directory=state))
+        refuses(lambda: store_nas_smb_secret("bad\npass", directory=state))
         assert require_nas_smb_secret(local) == "next-secret"
         destination.unlink()
         destination.symlink_to(state / "another-file")
