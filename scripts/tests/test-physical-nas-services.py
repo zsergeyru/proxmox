@@ -82,7 +82,7 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
 
     folders: list[dict[str, object]] = []
     resources: list[dict[str, object]] = []
-    settings: dict[str, object] = {"enable": False}
+    settings: dict[str, object] = {"enable": False, "shares": {"share": []}}
     updates: list[tuple[str, dict[str, object]]] = []
     salt_deploys: list[int] = []
 
@@ -94,6 +94,8 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             return ""
         operation, model = args[1:3]
         if operation == "read":
+            if model == "conf.service.smb":
+                settings["shares"] = {"share": list(resources)}
             data = {
                 "conf.system.sharedfolder": folders,
                 "conf.service.smb.share": resources,
@@ -118,6 +120,8 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             })
         else:
             assert model == "conf.service.smb"
+            resources[:] = list(payload.get("shares", {}).get("share", []))
+            settings.clear()
             settings.update(payload)
         return ""
 
@@ -146,6 +150,11 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
         assert len(resources) == 4
         assert len(salt_deploys) == 2
+        # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
+        settings["enable"] = False
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        assert len(resources) == 4
+        assert len(salt_deploys) == 3
 
 
 def test_omv_cli_failure_never_exposes_stderr() -> None:
@@ -263,12 +272,62 @@ def test_qbittorrent_deploy_prepares_image_safely() -> None:
     assert "ConditionPathIsMountPoint=" in unit
 
 
+def test_samba_service_automation() -> None:
+    """Samba запускается штатной OMV конфигурацией, без правки smb.conf."""
+
+    file = ROOT / "automation/ansible/playbooks/configure-nas-smb.yml"
+    content = file.read_text(encoding="utf-8")
+    assert content.index("Зарегистрировать папки и ресурсы через базу OMV") < (
+        content.index("Включить автозапуск и запустить Samba")
+    )
+    assert "state: started" in content
+    assert "enabled: true" in content
+    assert "samba-tool, testparm, --suppress-prompt" in content
+    assert "Прочитать журнал отказа Samba" in content
+    assert "Прервать настройку при ошибке службы Samba" in content
+    assert "/etc/samba/smb.conf" not in content
+
+
+def test_samba_safe_error_hints() -> None:
+    """Выводим только категории ошибок из фиксированного словаря."""
+
+    ansible = ModuleType("ansible")
+    plugins = ModuleType("ansible.plugins")
+    callback_module = ModuleType("ansible.plugins.callback")
+    callback_module.CallbackBase = object
+    path = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    spec = importlib.util.spec_from_file_location("test_samba_callback", path)
+    assert spec is not None and spec.loader is not None
+    module_obj = importlib.util.module_from_spec(spec)
+    with patch.dict(sys.modules, {
+        "ansible": ansible,
+        "ansible.plugins": plugins,
+        "ansible.plugins.callback": callback_module,
+    }):
+        spec.loader.exec_module(module_obj)
+
+    reasons = module_obj.CallbackModule._samba_reasons
+    for message, expected in (
+        ("bind: Address already in use on port 445", "Порт Samba"),
+        ("failed to load services from smb.conf", "конфигурации"),
+        ("Unit smbd.service is masked", "заблокирована"),
+    ):
+        classifications = reasons(message + " confidential-value-1234")
+        assert any(expected in item for item in classifications)
+        assert all("confidential-value-1234" not in item for item in classifications)
+    assert "confidential-value-1234" not in " ".join(
+        reasons("confidential-value-1234")
+    )
+
+
 def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
     test_shares()
     test_omv_shared_folders_use_real_database_uuids()
     test_omv_cli_failure_never_exposes_stderr()
+    test_samba_service_automation()
+    test_samba_safe_error_hints()
     test_backup_identifiers()
     test_no_forced_rollback()
     test_qbittorrent_failure_diagnostics()

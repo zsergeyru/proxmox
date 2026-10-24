@@ -81,6 +81,40 @@ class CallbackModule(CallbackBase):
         ]
 
     @staticmethod
+    def _samba_reasons(output: str) -> list[str]:
+        """Безопасная классификация причин отказа smbd по systemd-журналу."""
+
+        lower = str(output or "").lower()[:50000]
+        patterns = (
+            (r"address already in use|failed to bind|bind.*failed|"
+             r"error binding to.*(?:445|139)",
+             "Порт Samba 445/139 занят другим процессом"),
+            (r"failed to load services|error loading services|"
+             r"failed to load .*smb\.conf|error in.*smb\.conf|"
+             r"failed to parse.*smb\.conf|testparm.*failed",
+             "Ошибка конфигурации Samba, созданной средствами OMV"),
+            (r"unit .*smbd.*not found|smbd\.service.*not found|"
+             r"could not be found|failed to find executable",
+             "Не установлена или недоступна штатная служба Samba"),
+            (r"unit .*smbd.*masked|smbd\.service is masked",
+             "Служба Samba заблокирована в systemd (masked)"),
+            (r"permission denied|operation not permitted",
+             "Службе Samba не хватает разрешений для запуска"),
+            (r"no space left on device",
+             "Недостаточно места для работы службы Samba"),
+            (r"start request repeated too quickly|start-limit-hit",
+             "Samba несколько раз аварийно завершилась при запуске"),
+            (r"out of memory|oom-kill|killed process.*smbd",
+             "Процесс Samba завершён из-за нехватки памяти"),
+            (r"timed out|timeout", "Превышено время запуска Samba"),
+        )
+        result = [description for pattern, description in patterns
+                  if re.search(pattern, lower)]
+        return result[:3] or [
+            "Samba не стартовала; systemd-журнал не содержит распознанной причины"
+        ]
+
+    @staticmethod
     def _qbittorrent_reasons(output: str) -> list[str]:
         """Классифицировать docker/systemd без вывода текста журнала и секретов."""
 
@@ -259,6 +293,16 @@ class CallbackModule(CallbackBase):
             else:
                 for reason in self._qbittorrent_reasons(data.get("stdout", "")):
                     self._display.display("[ПРИЧИНА] " + reason)
+        elif task == "Прочитать журнал отказа Samba":
+            if data.get("rc") != 0:
+                self._display.display(
+                    "[ПРИЧИНА] Не удалось прочитать журнал systemd службы Samba"
+                )
+            else:
+                for reason in self._samba_reasons(data.get("stdout", "")):
+                    self._display.display("[ПРИЧИНА] " + reason)
+        elif task == "Проверить запущенную службу Samba":
+            self._display.display("[ОК] Samba запущена и доступна как smbd.service")
         elif task == "Подтвердить загрузку ZFS в работающее ядро":
             self._display.display("[ОК] ZFS загружен для работающего ядра NAS")
         elif task == "Загрузить проверенный модуль ZFS в работающее ядро":
@@ -287,6 +331,33 @@ class CallbackModule(CallbackBase):
         if isinstance(rc, int):
             self._display.display(f"[ОШИБКА] Код возврата: {rc}")
         if task == "Прервать настройку из-за ошибки обновления APT":
+            return
+        # Перед разбором конкретного этапа строго не показываем произвольные
+        # msg/stderr/stdout Ansible: они могут содержать пароли или пути.
+        output = " ".join(
+            str(data.get(field, "")) for field in ("msg", "stderr", "stdout")
+        )
+        if task == "Включить автозапуск и запустить Samba":
+            self._display.display(
+                "[ПРОВЕРКА] Читаем системный журнал отказа службы Samba"
+            )
+            return
+        if task == "Проверить итоговую конфигурацию Samba":
+            self._display.display(
+                "[ПРИЧИНА] Проверка samba-tool testparm завершилась ошибкой; "
+                "необходимо проверить модель конфигурации OMV"
+            )
+            return
+        if task == "Прервать настройку при ошибке службы Samba":
+            self._display.display(
+                "[ПРИЧИНА] Samba не запущена; данные дисков не изменялись"
+            )
+            return
+        if task == "Проверить запущенную службу Samba":
+            self._display.display(
+                "[ПРИЧИНА] Samba не активна (systemctl is-active вернул "
+                + ("inactive" if rc == 3 else "ошибку") + ")"
+            )
             return
         if task == "Зарегистрировать папки и ресурсы через базу OMV":
             # Скрипт печатает только фиксированную стадию и код возврата.
@@ -335,9 +406,6 @@ class CallbackModule(CallbackBase):
             return
         # Тип ошибки выводится только из заранее утверждённого набора,
         # чтобы не переслать в консоль пароли из msg/args/stdout.
-        output = " ".join(
-            str(data.get(field, "")) for field in ("msg", "stderr", "stdout")
-        )
         if task in {
             "Подтвердить готовность ZFS после сборки DKMS",
             "Подтвердить загрузку ZFS в работающее ядро",
