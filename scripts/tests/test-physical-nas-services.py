@@ -150,6 +150,11 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
         assert len(resources) == 4
         assert len(salt_deploys) == 2
+        # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
+        settings["enable"] = False
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        assert len(resources) == 4
+        assert len(salt_deploys) == 3
 
 
 def test_omv_cli_failure_never_exposes_stderr() -> None:
