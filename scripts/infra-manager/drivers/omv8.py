@@ -23,6 +23,35 @@ from infra_manager.physical_nas_status import verify_nas_services, show_nas_stat
 from infra_manager.physical_nas_volumes import verify_nas_volumes
 
 
+def validate_storage(storage: object) -> None:
+    """OMV-specific disk and volume safety invariants."""
+    roles = [entry["role"] for entry in storage.devices]
+    if any(entry["by_id"] is not None for entry in storage.devices):
+        raise InfraManagerError(
+            f"{storage.manifest}: by_id не поддерживается этим драйвером"
+        )
+    for role in ("shared", "data", "backup"):
+        if roles.count(role) != 1:
+            raise InfraManagerError(
+                f"{storage.manifest}: требуется ровно один диск роли {role}"
+            )
+    if {entry["id"] for entry in storage.volumes} != {
+        "shared", "data", "backup",
+    }:
+        raise InfraManagerError(
+            f"{storage.manifest}: требуются тома shared, data, backup"
+        )
+    expected = {"shared": "ext4", "data": "zfs_pool", "backup": "zfs_pool"}
+    if {entry["id"]: entry["kind"] for entry in storage.volumes} != expected:
+        raise InfraManagerError(f"{storage.manifest}: неверные файловые системы")
+    for entry in storage.volumes:
+        if entry["device"] != entry["id"]:
+            raise InfraManagerError(f"{storage.manifest}: неверная роль тома")
+    for role in ("data", "backup"):
+        if storage.volume(role)["pool"] != "nas-" + role:
+            raise InfraManagerError(f"{storage.manifest}: неверный ZFS pool")
+
+
 def execute(repo_root: Path, operation: str, host: PhysicalHost) -> int:
     """OMV8 driver; loaded explicitly from repository driver directory."""
 
