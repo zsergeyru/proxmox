@@ -1,11 +1,11 @@
 $schema: https://json-schema.org/draft/2020-12/schema
-title: Права сетевых папок NAS
+title: Guest-only network share access on the physical NAS
 type: object
 additionalProperties: false
-required: [schema_version, shares]
+required: [schema_version, mode, shares]
 properties:
-  schema_version:
-    const: 1
+  schema_version: {const: 2}
+  mode: {const: guest_only}
   shares:
     type: object
     additionalProperties: false
@@ -18,17 +18,6 @@ $defs:
   permissions:
     type: object
     additionalProperties: false
-    required: [read_groups, write_groups]
+    required: [access]
     properties:
-      read_groups:
-        type: array
-        uniqueItems: true
-        items:
-          type: string
-          pattern: '^[a-z][a-z0-9_-]{1,31}$'
-      write_groups:
-        type: array
-        uniqueItems: true
-        items:
-          type: string
-          pattern: '^[a-z][a-z0-9_-]{1,31}$'
+      access: {const: read_write}

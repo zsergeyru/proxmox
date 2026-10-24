@@ -27,6 +27,7 @@
       ansible.builtin.apt:
         name:
           - smartmontools
+          - acl
           - gdisk
           - e2fsprogs
           - util-linux

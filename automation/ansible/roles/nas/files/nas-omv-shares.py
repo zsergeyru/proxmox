@@ -88,14 +88,28 @@ def validated_folders(value: object) -> tuple[tuple[str, str, str], ...]:
     return tuple(declared)
 
 
+def validated_access(value: object, plan: tuple[tuple[str, str, str], ...]) -> None:
+    """Allow only explicit guest-only read/write rights on declared folders."""
+    names = {name for name, _role, _directory in plan}
+    if (not isinstance(value, dict) or set(value) != {"mode", "shares"}
+            or value["mode"] != "guest_only"
+            or not isinstance(value["shares"], dict)
+            or set(value["shares"]) != names
+            or any(rights != {"access": "read_write"}
+                   for rights in value["shares"].values())):
+        raise ShareError("SMB: требуется явный guest_only/read_write для всех папок")
+
+
 def plan_shares(
     shared: str, data: str,
     existing_folders: list[dict[str, object]],
     existing_smb: list[dict[str, object]],
     folders_plan: tuple[tuple[str, str, str], ...],
+    access: dict,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Согласовать новые записи до любых изменений OMV."""
 
+    validated_access(access, folders_plan)
     mapping = {"shared": shared, "data": data}
     missing_folders: list[dict[str, object]] = []
     missing_smb: list[dict[str, object]] = []
@@ -150,17 +164,25 @@ def plan_shares(
             raise ShareError(f"Несколько SMB-ресурсов используют папку {name}")
         if smb_items:
             item = smb_items[0]
-            if item.get("guest") != "no":
-                raise ShareError(
-                    f"У существующего ресурса {name} открыт гостевой доступ"
-                )
+            if (item.get("guest") != "only"
+                    or item.get("readonly") is not False
+                    or item.get("enable") is not True):
+                if not re.fullmatch(
+                    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+                    str(item.get("uuid", "")),
+                ):
+                    raise ShareError(f"Нет подтверждённого UUID ресурса: {name}")
+                # Preserve all unrelated OMV options; update only access.
+                missing_smb.append({
+                    **item, "guest": "only", "readonly": False, "enable": True,
+                })
             continue
         missing_smb.append({
             "uuid": _new_uuid(),
             "enable": True,
             "sharedfolderref": folder_ref,
             "comment": "Домашний NAS",
-            "guest": "no",
+            "guest": "only",
             "readonly": False,
             "browseable": True,
             "recyclebin": False,
@@ -184,10 +206,11 @@ def plan_shares(
 
 
 def apply(shared: str, data: str, shared_mount: str, data_mount: str,
-          declarations: object) -> None:
+          declarations: object, access: object) -> None:
     """Сверить фактические каталоги и изменить только отсутствующие записи."""
 
     folders_plan = validated_folders(declarations)
+    validated_access(access, folders_plan)
     roots = {"shared": shared_mount, "data": data_mount}
     for _name, role, directory in folders_plan:
         root = Path(roots[role])
@@ -199,7 +222,9 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str,
 
     folders = records("conf.system.sharedfolder")
     smb = records("conf.service.smb.share")
-    missing_folders, missing_smb = plan_shares(shared, data, folders, smb, folders_plan)
+    missing_folders, missing_smb = plan_shares(
+        shared, data, folders, smb, folders_plan, access,
+    )
 
     global_settings = json.loads(
         command("omv-confdbadm", "read", "conf.service.smb")
@@ -232,17 +257,25 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str,
     # выданные OMV. Если запуск ранее оборвался, повтор не создаёт дубликаты.
     if missing_folders:
         folders = records("conf.system.sharedfolder")
-    _, missing_smb = plan_shares(shared, data, folders, smb, folders_plan)
+    _, missing_smb = plan_shares(
+        shared, data, folders, smb, folders_plan, access,
+    )
+    known_uuids = {str(item.get("uuid")) for item in smb}
     for item in missing_smb:
+        # An existing managed share must be UPDATED by its genuine OMV UUID.
+        # New shares omit UUID and receive one from the OMV database.
+        is_existing = str(item["uuid"]) in known_uuids
+        payload = item if is_existing else {
+            k: v for k, v in item.items() if k != "uuid"
+        }
         command(
             "omv-confdbadm", "update", "conf.service.smb.share",
-            json.dumps({k: v for k, v in item.items() if k != "uuid"},
-                       ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
         )
     if missing_folders or missing_smb or not enabled_before:
         command("omv-salt", "deploy", "run", "samba")
-        print("[ОК] Созданы новые записи SMB в OpenMediaVault")
-    print("[ОК] Папки SMB зарегистрированы без гостевого доступа")
+        print("SMB_CHANGED: согласованы ресурсы OMV")
+    print("[ОК] Папки SMB: гостевой доступ без пароля, чтение и запись")
 
 
 def main() -> int:
@@ -250,6 +283,7 @@ def main() -> int:
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--shares-json", required=True)
+    parser.add_argument("--access-json", required=True)
     parser.add_argument("--shared-ref", required=True)
     parser.add_argument("--data-ref", required=True)
     parser.add_argument("--shared-mount", required=True)
@@ -258,7 +292,7 @@ def main() -> int:
     try:
         apply(
             args.shared_ref, args.data_ref, args.shared_mount, args.data_mount,
-            json.loads(args.shares_json),
+            json.loads(args.shares_json), json.loads(args.access_json),
         )
     except (OSError, ValueError, ShareError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)

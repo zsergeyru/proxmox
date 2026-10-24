@@ -1,20 +1,10 @@
-# Права сетевых папок NAS. Пользователи и группы — в ../../users.yaml.
-# Пароли SMB и данные Authelia здесь не хранятся.
-schema_version: 1
-
-# Пустые списки запрещают соответствующий доступ.
-# Группы из infrastructure/users.yaml: admins, family, guests.
-# Запись также разрешает чтение.
+# SMB on the physical NAS: anonymous guest-only, full read/write on declared
+# shared folders. This does NOT affect OMV/SSH/Authelia authentication.
+# UrBackup backup directories are not shared by provision.yaml.
+schema_version: 2
+mode: guest_only
 shares:
-  shared:
-    read_groups: []
-    write_groups: []
-  movies:
-    read_groups: []
-    write_groups: []
-  music:
-    read_groups: []
-    write_groups: []
-  data:
-    read_groups: []
-    write_groups: []
+  shared: {access: read_write}
+  movies: {access: read_write}
+  music: {access: read_write}
+  data: {access: read_write}
