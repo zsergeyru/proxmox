@@ -201,7 +201,7 @@ def test_docker_and_deploy_contract():
     assert "ExecStartPre=" in unit and "nas-urbackup-safe preflight" in unit
     assert "RequiresMountsFor=" in unit
     operations = (
-        ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
+        ROOT / "scripts/infra-manager/drivers/omv8.py"
     ).read_text()
     assert "run_nas_phase(" in operations
     assert "configure_nas_backups(" not in operations
