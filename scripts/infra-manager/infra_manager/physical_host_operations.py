@@ -27,7 +27,7 @@ from .physical_nas_storage_state import apply_saved_storage
 from .physical_nas_storage_prepare import prepare_blank_disks, read_pending_recovery
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
-    configure_nas, configure_nas_apps, configure_nas_urbackup, configure_nas_smb,
+    configure_nas, configure_nas_apps, configure_nas_urbackup, configure_nas_urbackup_local, configure_nas_smb,
 )
 from .physical_nas_backup_policy import load_nas_backup_policy, verify_nas_backup_volumes
 from .physical_nas_status import verify_nas_services
@@ -268,6 +268,12 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     repo_root, session,
                     source_guid=host.volumes["data"]["pool_guid"],
                     backup_guid=host.volumes["backup"]["pool_guid"],
+                    data_mountpoint=data.mountpoint,
+                    backup_mountpoint=backup.mountpoint,
+                    policy=policy,
+                )
+                configure_nas_urbackup_local(
+                    repo_root, session,
                     data_mountpoint=data.mountpoint,
                     backup_mountpoint=backup.mountpoint,
                     policy=policy,
