@@ -110,11 +110,14 @@ jobs:
       - name: Check NAS UrBackup policy, ZFS guards and deployment
         run: python scripts/tests/test-nas-urbackup.py
 
+      - name: Check declarative NAS role and shared host status
+        run: python scripts/tests/test-nas-declarative.py
+
       - name: Smoke-test actual UrBackup client LAN configuration in Docker
         run: |
           set -euo pipefail
           docker pull uroni/urbackup-client:2.5.31
-          config="$PWD/automation/ansible/templates/nas-urbackup-client.defaults.j2"
+          config="$PWD/automation/ansible/roles/nas/templates/nas-urbackup-client.defaults.j2"
           grep -Fx INTERNET_ONLY=false "$config"
           data="$(mktemp -d)"
           mkdir -p "$data/client-data" "$data/client-config"
@@ -693,13 +696,14 @@ jobs:
             -e "guest=$guest_dir" \
             automation/ansible/playbooks/configure-guest.yml
           # Full Ansible parsing: PyYAML alone missed malformed command arguments.
-          for playbook in configure-nas-urbackup.yml configure-nas-urbackup-client.yml; do
+          for playbook in configure-nas-urbackup.yml configure-nas-urbackup-client.yml deploy-nas.yml; do
             docker run --rm \
               -v "$PWD:/workspace" \
               -w /workspace \
               bootstrap-runtime:test \
               ansible-playbook --syntax-check \
               -i nas, \
+              -e nas_deploy_phase=base \
               "automation/ansible/playbooks/$playbook"
           done
 
