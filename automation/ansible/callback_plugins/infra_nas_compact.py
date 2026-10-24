@@ -81,6 +81,55 @@ class CallbackModule(CallbackBase):
         ]
 
     @staticmethod
+    def _qbittorrent_reasons(output: str) -> list[str]:
+        """Классифицировать docker/systemd без вывода текста журнала и секретов."""
+
+        text = str(output or "").lower()[:50000]
+        known = (
+            (r"port is already allocated|bind: address already in use|"
+             r"failed to bind host port|address already in use",
+             "Docker не смог занять сетевой порт qBittorrent (8080 либо 6881)"),
+            (r"manifest unknown|no matching manifest|manifest for .* not found",
+             "Указанный образ или архитектура недоступны в реестре Docker"),
+            (r"toomanyrequests|too many requests|rate limit",
+             "Реестр Docker ограничил число запросов"),
+            (r"pull access denied|requested access to the resource is denied|"
+             r"unauthorized: authentication required",
+             "Реестр Docker отклонил доступ к образу"),
+            (r"lookup .* no such host|temporary failure in name resolution|"
+             r"could not resolve host|network is unreachable|no route to host",
+             "У NAS проблема с DNS либо маршрутом до реестра Docker"),
+            (r"x509:|certificate verify failed|tls handshake|unknown authority",
+             "Не удалось проверить TLS-сертификат реестра Docker"),
+            (r"i/o timeout|context deadline exceeded|connection timed out|"
+             r"client.timeout exceeded|net/http: request canceled",
+             "Время ожидания сетевого соединения Docker истекло"),
+            (r"no space left on device|insufficient space",
+             "На диске для Docker недостаточно свободного места"),
+            (r"cannot connect to the docker daemon|is the docker daemon running|"
+             r"error during connect",
+             "Docker Engine недоступен при запуске контейнера"),
+            (r"permission denied|operation not permitted",
+             "Отказ в правах Docker, контейнера либо подключённого каталога"),
+            (r"invalid compose project|validating .*compose|additional properties "
+             r"are not allowed|yaml: line|services\.qbittorrent",
+             "Docker Compose отклонил описание приложения"),
+            (r"failed to create shim task|failed to start containerd task",
+             "Ошибка запуска контейнера в containerd"),
+            (r"timed out waiting for.*start|start operation timed out|"
+             r"start operation timed out\. terminating|start-pre operation timed out",
+             "Превышено время запуска службы systemd"),
+            (r"conditionpathismountpoint|not a mountpoint|"
+             r"failed at step exec|executable .* not found",
+             "Не выполнено условие подключения HDD либо отсутствует команда Docker"),
+        )
+        result = [label for pattern, label in known if re.search(pattern, text)]
+        return result[:3] or [
+            "Причина запуска qBittorrent не определена по журналу; "
+            "доступна безопасная диагностика systemctl status и journalctl на NAS"
+        ]
+
+    @staticmethod
     def _apt_hosts(output: str) -> list[str]:
         """Показывать только DNS-имена репозиториев, без userinfo/путей/токенов."""
 
@@ -202,6 +251,14 @@ class CallbackModule(CallbackBase):
                         "[ПРИЧИНА] DKMS не собрал ZFS: проверьте совместимость "
                         "версий ядра, ZFS и заголовков"
                     )
+        elif task == "Прочитать журнал отказа запуска qBittorrent":
+            if data.get("rc") != 0:
+                self._display.display(
+                    "[ПРИЧИНА] Не удалось прочитать журнал systemd для qBittorrent"
+                )
+            else:
+                for reason in self._qbittorrent_reasons(data.get("stdout", "")):
+                    self._display.display("[ПРИЧИНА] " + reason)
         elif task == "Подтвердить загрузку ZFS в работающее ядро":
             self._display.display("[ОК] ZFS загружен для работающего ядра NAS")
         elif task == "Загрузить проверенный модуль ZFS в работающее ядро":
@@ -230,6 +287,22 @@ class CallbackModule(CallbackBase):
         if isinstance(rc, int):
             self._display.display(f"[ОШИБКА] Код возврата: {rc}")
         if task == "Прервать настройку из-за ошибки обновления APT":
+            return
+        if task == "Загрузить образ qBittorrent при отсутствии":
+            for reason in self._qbittorrent_reasons(
+                " ".join(str(data.get(field, "")) for field in ("msg", "stderr", "stdout"))
+            ):
+                self._display.display("[ПРИЧИНА] " + reason)
+            return
+        if task == "Подключить службу qBittorrent после проверки HDD":
+            self._display.display(
+                "[ПРОВЕРКА] Читаем журнал systemd, чтобы определить причину отказа"
+            )
+            return
+        if task == "Остановить развёртывание после ошибки запуска qBittorrent":
+            self._display.display(
+                "[ПРИЧИНА] Контейнер не запущен; диски NAS не изменялись"
+            )
             return
         # Тип ошибки выводится только из заранее утверждённого набора,
         # чтобы не переслать в консоль пароли из msg/args/stdout.
