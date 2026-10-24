@@ -3,6 +3,8 @@
 # any declared app checks; no backup success claims here.
 schema_version: 2
 host: nas
+health:
+  disk_usage_warning_percent: 95
 checks:
   - type: systemd
     component: base
