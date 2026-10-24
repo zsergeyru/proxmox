@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import io
 import json
+import tarfile
 import sys
 import tempfile
 from pathlib import Path
@@ -150,6 +152,33 @@ def test_scripts_have_no_destructive_fallback():
     ).read_text(encoding="utf-8")
 
 
+
+def test_plain_state_archive_verification():
+    """Архив читается без ключа; повреждённые данные отвергаются SHA-256."""
+    with tempfile.TemporaryDirectory() as td:
+        folder = Path(td)
+        archive = folder / "state-20261024T120000Z.tar"
+        with tarfile.open(archive, "w") as tar:
+            state_dir = tarfile.TarInfo(recovery.PATHS[0])
+            state_dir.type = tarfile.DIRTYPE
+            tar.addfile(state_dir)
+            for filename in recovery.PATHS[1:]:
+                data = b"test-only-no-secret"
+                record = tarfile.TarInfo(filename)
+                record.size = len(data)
+                tar.addfile(record, io.BytesIO(data))
+        checksum = recovery.digest(archive)
+        archive.with_suffix(".sha256").write_text(checksum + "\n", encoding="ascii")
+        with patch.object(recovery, "destination", return_value=folder):
+            recovery.verify()
+            assert archive.open("rb").read(6) != b"Salted"
+            with archive.open("ab") as data:
+                data.write(b"modified")
+            refuses(recovery.verify, recovery.RecoveryError)
+        assert "recovery-key" not in recovery.PATHS
+
+
+
 def test_docker_and_deploy_contract():
     folder = ROOT / "automation/ansible"
     compose = (folder / "templates/nas-urbackup.compose.yml.j2").read_text()
@@ -175,6 +204,7 @@ def main() -> int:
     test_volume_contract()
     test_live_guard_is_read_only()
     test_scripts_have_no_destructive_fallback()
+    test_plain_state_archive_verification()
     test_docker_and_deploy_contract()
     print("[ОК] NAS UrBackup: политика, GUID, безопасность и новые задания")
     return 0
