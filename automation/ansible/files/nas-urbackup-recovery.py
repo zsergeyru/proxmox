@@ -34,6 +34,7 @@ CLIENT_PATHS = (
     "var/lib/nas-apps/urbackup/client/data",
     "var/lib/nas-apps/urbackup/client/config",
     "etc/nas-apps/urbackup/client-compose.yml",
+    "etc/nas-apps/urbackup/client-defaults",
 )
 PATHS = SERVER_PATHS + CLIENT_PATHS
 
