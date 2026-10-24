@@ -81,6 +81,16 @@ def test_provision_and_fail_closed_phases() -> None:
         assert load_nas_provision(Path(td))["deployment"]["components"] == (
             rearranged["deployment"]["components"]
         )
+        # Optional apps may be excluded along with the entire qBittorrent service.
+        reduced = copy.deepcopy(p)
+        reduced["deployment"]["components"] = [
+            "urbackup_server", "urbackup_client", "smb",
+        ]
+        del reduced["services"]["qbittorrent"]
+        (home / "provision.yaml").write_text(
+            yaml.safe_dump(reduced, allow_unicode=True), encoding="utf-8",
+        )
+        assert "qbittorrent" not in load_nas_provision(Path(td))["services"]
 
 
     session = SimpleNamespace(host=SimpleNamespace(name="nas", address="192.168.1.12"))
@@ -98,6 +108,12 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     main = yaml.safe_load((prefix / "roles/nas/tasks/main.yml").read_text())
     assert any("include_tasks" in " ".join(task) for task in main)
     assert "nas_provision.deployment.components" in str(main)
+    assertions = main[0]["ansible.builtin.assert"]["that"]
+    assert any(
+        "'apps' not in nas_provision.deployment.components" in item
+        and "services.get('qbittorrent'" in item
+        for item in assertions
+    ), "Disabled apps must not require a qBittorrent service"
     paths = [
         "base.yml", "urbackup_server.yml", "urbackup_client.yml", "apps.yml", "smb.yml",
     ]
