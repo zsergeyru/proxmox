@@ -1,9 +1,0 @@
----
-# Compatibility entrypoint; deploy nas uses deploy-nas.yml and the nas role.
-- name: Зарегистрировать общие папки через OpenMediaVault
-  hosts: nas
-  gather_facts: false
-  become: false
-  roles:
-    - role: nas
-      tasks_from: smb
