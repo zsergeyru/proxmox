@@ -6,9 +6,9 @@ services:
     environment:
       PUID: "{{ nas_qbit_uid.stdout }}"
       PGID: "{{ nas_qbit_gid.stdout }}"
-      TZ: Etc/UTC
-      WEBUI_PORT: "8080"
-      TORRENTING_PORT: "6881"
+      TZ: "{{ nas_provision.services.qbittorrent.runtime.timezone }}"
+      WEBUI_PORT: "{{ nas_provision.services.qbittorrent.runtime.web_port }}"
+      TORRENTING_PORT: "{{ nas_provision.services.qbittorrent.runtime.torrent_port }}"
     volumes:
       - type: bind
         source: /var/lib/nas-apps/qbittorrent/config
@@ -16,12 +16,12 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: "{{ nas_shared_mount }}/downloads"
+        source: "{{ nas_shared_mount }}/{{ nas_provision.services.qbittorrent.runtime.downloads_directory }}"
         target: /downloads
         bind:
           create_host_path: false
     ports:
-      - "8080:8080"
-      - "6881:6881/tcp"
-      - "6881:6881/udp"
+      - "{{ nas_provision.services.qbittorrent.runtime.web_port }}:{{ nas_provision.services.qbittorrent.runtime.web_port }}"
+      - "{{ nas_provision.services.qbittorrent.runtime.torrent_port }}:{{ nas_provision.services.qbittorrent.runtime.torrent_port }}/tcp"
+      - "{{ nas_provision.services.qbittorrent.runtime.torrent_port }}:{{ nas_provision.services.qbittorrent.runtime.torrent_port }}/udp"
     restart: "no"
