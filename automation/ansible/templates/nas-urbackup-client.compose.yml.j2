@@ -1,6 +1,8 @@
 # Client is a permanent LAN service. Override upstream internet-mode
 # entrypoint: it requires a secret auth key and auto-adds /backup. This NAS
 # must only expose a verified ZFS snapshot during a scheduled backup.
+name: nas-urbackup-client
+
 services:
   client:
     image: "{{ nas_urbackup_client_image }}"
