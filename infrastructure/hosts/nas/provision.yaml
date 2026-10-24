@@ -28,6 +28,12 @@ services:
     component: apps
     title: qBittorrent
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
+    runtime:
+      timezone: Etc/UTC
+      web_port: 8080
+      torrent_port: 6881
+      downloads_directory: downloads
+      directories: [downloads, downloads/incomplete, downloads/complete]
     url: "http://{address}:8080/"
     operator:
       username: admin
