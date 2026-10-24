@@ -27,8 +27,9 @@ from .physical_nas_storage_state import apply_saved_storage
 from .physical_nas_storage_prepare import prepare_blank_disks, read_pending_recovery
 from .physical_nas_system import read_nas_system, require_omv8
 from .physical_nas_ansible import (
-    configure_nas, configure_nas_apps, configure_nas_backups, configure_nas_smb,
+    configure_nas, configure_nas_apps, configure_nas_urbackup, configure_nas_smb,
 )
+from .physical_nas_backup_policy import load_nas_backup_policy, verify_nas_backup_volumes
 from .physical_nas_status import verify_nas_services
 from .physical_nas_volumes import verify_nas_volumes
 from .common import run
@@ -261,17 +262,20 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                     data_mountpoint=data.mountpoint,
                     data_ref=host.volumes["data"]["omv_reference"],
                 )
-                configure_nas_backups(
+                policy = load_nas_backup_policy(repo_root)
+                verify_nas_backup_volumes(policy, verified)
+                configure_nas_urbackup(
                     repo_root, session,
                     source_guid=host.volumes["data"]["pool_guid"],
                     backup_guid=host.volumes["backup"]["pool_guid"],
                     data_mountpoint=data.mountpoint,
                     backup_mountpoint=backup.mountpoint,
+                    policy=policy,
                 )
                 verify_nas_services(session, disks=disks, volumes=verified)
                 console.result(
                     "NAS настроен: OMV, ZFS, SMB, Docker, qBittorrent, "
-                    "расписание резервирования. Данные не форматировались"
+                    "UrBackup Server установлен; копии ещё требуют проверки. Данные не форматировались"
                 )
                 return 0
         expected_serials = {
