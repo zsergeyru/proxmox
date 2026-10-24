@@ -18,7 +18,7 @@ def module(file: str, alias: str):
     """Загрузить локальный сценарий без установки на NAS."""
 
     spec = importlib.util.spec_from_file_location(
-        alias, ROOT / "automation/ansible/roles/nas/files" / file
+        alias, ROOT / ("automation/ansible/files" if file == "nas-zfs-backup.py" else "automation/ansible/roles/nas/files") / file
     )
     if spec is None or spec.loader is None:
         raise AssertionError(f"Не найден сценарий: {file}")
@@ -202,7 +202,7 @@ def test_no_forced_rollback() -> None:
     """Сценарий не имеет способов автоматического отката и удаления ZFS."""
 
     source = (
-        ROOT / "automation/ansible/roles/nas/files/nas-zfs-backup.py"
+        ROOT / "automation/ansible/files/nas-zfs-backup.py"
     ).read_text(encoding="utf-8")
     for forbidden in ('"destroy"', '"-F"', '"rollback"', '"wipefs"'):
         assert forbidden not in source, forbidden
