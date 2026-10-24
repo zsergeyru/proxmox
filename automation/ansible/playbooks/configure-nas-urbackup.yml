@@ -162,18 +162,13 @@
         daemon_reload: true
         state: "{{ 'restarted' if (nas_urbackup_compose.changed or nas_urbackup_unit.changed) else 'started' }}"
 
-    - name: Установить исполнитель защищённой копии состояния UrBackup
+    - name: Установить исполнитель обычной копии состояния UrBackup
       ansible.builtin.copy:
         src: ../files/nas-urbackup-recovery.py
         dest: /usr/local/sbin/nas-urbackup-recovery
         owner: root
         group: root
         mode: "0750"
-
-    - name: Подготовить ключ шифрованного состояния без вывода секрета
-      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-recovery, key]
-      changed_when: false
-      no_log: true
 
     - name: Установить службу сохранения состояния UrBackup
       ansible.builtin.template:
