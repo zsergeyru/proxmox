@@ -143,7 +143,8 @@ def test_scripts_have_no_destructive_fallback():
                        "docker volume prune"):
             assert unsafe not in text, (file, unsafe)
     assert snapshot.STAGING.as_posix().startswith("/run/")
-    assert recovery.KEY.as_posix().startswith("/etc/nas-apps/")
+    assert "recovery-key" not in (ROOT / "automation/ansible/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
+    assert "AES" not in (ROOT / "automation/ansible/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
     assert "confirmed" in (
         ROOT / "automation/ansible/files/nas-urbackup-snapshot.py"
     ).read_text(encoding="utf-8")
