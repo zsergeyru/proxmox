@@ -96,7 +96,7 @@ def main() -> int:
         run(MOUNT_GUARD, "check")
         config = json.loads(CONFIG.read_text(encoding="utf-8"))
         src = config["source_mount"]
-        ds = "nas-data"
+        ds = config["source_pool"]
         # Дочерние datasets требуют отдельных снимков и mount: не пропускаем их.
         children = run("zfs", "list", "-H", "-o", "name", "-r", ds).splitlines()
         if children != [ds]:
