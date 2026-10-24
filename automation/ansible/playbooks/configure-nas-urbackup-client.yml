@@ -39,19 +39,69 @@
         group: root
       when: not nas_urbackup_client_installed.stat.exists
 
-    - name: Скачать фиксированный UrBackup Client 2.5.31 по HTTPS
+    - name: Проверить кэш установщика UrBackup перед сетевой загрузкой
+      ansible.builtin.stat:
+        path: /var/cache/nas-apps/urbackup-client-2.5.31.sh
+        follow: false
+      register: nas_urbackup_client_cached
+      when: not nas_urbackup_client_installed.stat.exists
+
+    - name: Скачать фиксированный UrBackup Client 2.5.31 с основного сайта
       ansible.builtin.get_url:
         url: "https://hndl.urbackup.org/Client/2.5.31/UrBackup%20Client%20Linux%202.5.31.sh"
         dest: /var/cache/nas-apps/urbackup-client-2.5.31.sh
         mode: "0600"
         owner: root
         group: root
-        timeout: 60
+        force: true
+        timeout: 120
+      register: nas_urbackup_client_primary
+      failed_when: false
+      when:
+        - not nas_urbackup_client_installed.stat.exists
+        - not nas_urbackup_client_cached.stat.exists or (nas_urbackup_client_cached.stat.size | default(0) | int) != 27296346
+
+    - name: Проверить размер полученного с основного сайта установщика
+      ansible.builtin.stat:
+        path: /var/cache/nas-apps/urbackup-client-2.5.31.sh
+        follow: false
+      register: nas_urbackup_client_primary_file
+      when: not nas_urbackup_client_installed.stat.exists
+
+    - name: Скачать UrBackup Client 2.5.31 с официального архивного зеркала
+      ansible.builtin.get_url:
+        url: "https://wwwold.urbackup.org/downloads/Client/2.5.31/UrBackup%20Client%20Linux%202.5.31.sh"
+        dest: /var/cache/nas-apps/urbackup-client-2.5.31.sh
+        mode: "0600"
+        owner: root
+        group: root
+        force: true
+        timeout: 120
+      register: nas_urbackup_client_mirror
+      when:
+        - not nas_urbackup_client_installed.stat.exists
+        - not nas_urbackup_client_primary_file.stat.exists or (nas_urbackup_client_primary_file.stat.size | default(0) | int) != 27296346
+
+    - name: Проверить целостность загрузки клиента по ожидаемой длине
+      ansible.builtin.stat:
+        path: /var/cache/nas-apps/urbackup-client-2.5.31.sh
+        follow: false
+      register: nas_urbackup_client_archive
+      when: not nas_urbackup_client_installed.stat.exists
+
+    - name: Запретить выполнение неполного или подменённого файла установщика
+      ansible.builtin.assert:
+        that:
+          - nas_urbackup_client_archive.stat.exists
+          - nas_urbackup_client_archive.stat.isreg | default(false)
+          - not nas_urbackup_client_archive.stat.islnk | default(false)
+          - (nas_urbackup_client_archive.stat.size | default(0) | int) == 27296346
+        fail_msg: Размер установщика UrBackup Client 2.5.31 не соответствует официальному файлу; запуск запрещён
       when: not nas_urbackup_client_installed.stat.exists
 
     - name: Установить Linux-клиент без интерактивных вопросов
       ansible.builtin.command:
-        argv: [sh, /var/cache/nas-apps/urbackup-client-2.5.31.sh, --quiet]
+        argv: [sh, /var/cache/nas-apps/urbackup-client-2.5.31.sh, --, silent]
         creates: /usr/local/bin/urbackupclientctl
       when: not nas_urbackup_client_installed.stat.exists
       no_log: true

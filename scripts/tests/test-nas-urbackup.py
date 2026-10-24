@@ -219,6 +219,68 @@ def test_docker_and_deploy_contract():
 
 
 
+
+def test_client_installer_sources_and_silent_arguments():
+    """Оба официальных источника и неполная загрузка блокируются до sh."""
+    path = ROOT / "automation/ansible/playbooks/configure-nas-urbackup-client.yml"
+    play = yaml.safe_load(path.read_text(encoding="utf-8"))[0]
+    tasks = play["tasks"]
+    by_name = {task["name"]: task for task in tasks}
+    primary = by_name["Скачать фиксированный UrBackup Client 2.5.31 с основного сайта"]
+    mirror = by_name["Скачать UrBackup Client 2.5.31 с официального архивного зеркала"]
+    main_url = primary["ansible.builtin.get_url"]
+    mirror_url = mirror["ansible.builtin.get_url"]
+    assert main_url["url"] == (
+        "https://hndl.urbackup.org/Client/2.5.31/"
+        "UrBackup%20Client%20Linux%202.5.31.sh"
+    )
+    assert mirror_url["url"] == (
+        "https://wwwold.urbackup.org/downloads/Client/2.5.31/"
+        "UrBackup%20Client%20Linux%202.5.31.sh"
+    )
+    for item in (primary, mirror):
+        args = item["ansible.builtin.get_url"]
+        assert args["timeout"] >= 60
+        assert args["force"] is True
+        assert args.get("validate_certs", True) is True
+        assert args["mode"] == "0600"
+    assert primary.get("failed_when") is False
+    assert mirror.get("when")
+    check = by_name["Запретить выполнение неполного или подменённого файла установщика"]
+    assert "27296346" in str(check["ansible.builtin.assert"]["that"])
+    runner = by_name["Установить Linux-клиент без интерактивных вопросов"]
+    assert runner["ansible.builtin.command"]["argv"][-2:] == ["--", "silent"]
+    assert runner.get("no_log") is True
+
+
+def test_safe_download_diagnostics():
+    """Категоризация не выводит произвольные адреса, ключи и ошибки целиком."""
+    from types import ModuleType
+    import sys as system
+    callback_file = ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    module_name = "nas_urbackup_client_callback_test"
+    fake_ansible = ModuleType("ansible")
+    fake_plugins = ModuleType("ansible.plugins")
+    fake_callback = ModuleType("ansible.plugins.callback")
+    fake_callback.CallbackBase = object
+    spec = importlib.util.spec_from_file_location(module_name, callback_file)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    with patch.dict(system.modules, {
+        "ansible": fake_ansible,
+        "ansible.plugins": fake_plugins,
+        "ansible.plugins.callback": fake_callback,
+    }):
+        spec.loader.exec_module(mod)
+    f = mod.CallbackModule._urbackup_download_reasons
+    assert "DNS" in f("urlopen error [Errno -3] Temporary failure in name resolution")[0]
+    assert "TLS" in f("CERTIFICATE_VERIFY_FAILED")[0]
+    assert "HTTP 404" in f("HTTP Error 404")[0]
+    assert "время" in f("Read timed out")[0]
+    secret = "token=b8f9fff-secret-value"
+    assert secret not in " ".join(f(secret))
+
+
 def main() -> int:
     test_backup_policy()
     test_volume_contract()
@@ -226,6 +288,8 @@ def main() -> int:
     test_scripts_have_no_destructive_fallback()
     test_plain_state_archive_verification()
     test_docker_and_deploy_contract()
+    test_client_installer_sources_and_silent_arguments()
+    test_safe_download_diagnostics()
     print("[ОК] NAS UrBackup: политика, GUID, безопасность и новые задания")
     return 0
 
