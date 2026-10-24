@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_nas_status import load_nas_status
+from infra_manager.physical_nas_status import load_nas_status, _load_nas_status_document
 from infra_manager.physical_nas_ansible import load_nas_provision, run_nas_phase
 from infra_manager.guest_status import (
     load_declared_checks, _run_declared_check, _service_fields,
@@ -60,6 +60,15 @@ def test_provision_and_fail_closed_phases() -> None:
         check_modified(lambda d: d["deployment"].update(phases=["services", "base"]))
         check_modified(lambda d: d["services"]["urbackup"].update(url="http://0.0.0.0:55414/"))
         check_modified(lambda d: d["services"]["qbittorrent"].update(image="untrusted:latest"))
+        check_modified(lambda d: d["services"]["qbittorrent"]["runtime"].update(
+            torrent_port=22
+        ))
+        check_modified(lambda d: d["services"]["qbittorrent"]["runtime"].update(
+            directories=["../etc"]
+        ))
+        check_modified(lambda d: d["services"]["qbittorrent"]["runtime"].update(
+            timezone="../bad;command"
+        ))
         check_modified(lambda d: d["services"]["urbackup"]["operator"].update(
             password={"source": "host_file", "path": "/etc/shadow"}
         ))
@@ -70,6 +79,15 @@ def test_provision_and_fail_closed_phases() -> None:
         check_modified(lambda d: d["deployment"].update(components=[
             "urbackup_client", "urbackup_server", "apps", "smb"
         ]))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            urbackup_client=[]
+        ))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            apps=["smb"]
+        ))
+        check_modified(lambda d: d["deployment"]["dependencies"].update(
+            urbackup_server=["urbackup_client"]
+        ))
         # Reordering independent applications is declarative, not hardcoded.
         rearranged = copy.deepcopy(p)
         rearranged["deployment"]["components"] = [
@@ -114,6 +132,16 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
         and "services.get('qbittorrent'" in item
         for item in assertions
     ), "Disabled apps must not require a qBittorrent service"
+    assert not any(
+        "components == ['urbackup_server'" in item for item in assertions
+    ), "Component composition must not be hardcoded"
+    assert any("difference(" in item for item in assertions)
+    assert "subelements('value')" in str(main), "Declared dependencies must be enforced"
+    app_tasks = (prefix / "roles/nas/tasks/apps.yml").read_text()
+    assert "nas_provision.services.qbittorrent.runtime.directories" in app_tasks
+    compose = (prefix / "roles/nas/templates/nas-qbittorrent.compose.yml.j2").read_text()
+    for key in ("timezone", "web_port", "torrent_port", "downloads_directory"):
+        assert "nas_provision.services.qbittorrent.runtime." + key in compose
     paths = [
         "base.yml", "urbackup_server.yml", "urbackup_client.yml", "apps.yml", "smb.yml",
     ]
@@ -129,7 +157,7 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     assert control.index('run_nas_phase(\n                    repo_root, session, "base"') < (
         control.index("verified = verify_nas_volumes(")
     )
-    assert control.index("verify_nas_backup_volumes(policy, verified)") < (
+    assert control.index("verify_nas_backup_volumes(\n") < (
         control.index('run_nas_phase(\n                    repo_root, session, "services"')
     )
 
@@ -139,6 +167,7 @@ def test_shared_status_parser_and_secret_control() -> None:
     checks = load_nas_status(ROOT, "nas", load_nas_provision(ROOT))
     assert checks == load_declared_checks(p, identity_field="host", identity_value="nas")
     assert len(checks) >= 5
+    assert _load_nas_status_document(ROOT, "nas")["health"]["disk_usage_warning_percent"] == 95
     assert any(item.get("container") == "nas-urbackup-client" for item in checks)
     refuses(lambda: load_declared_checks(p, identity_field="host", identity_value="other"))
     refuses(lambda: load_declared_checks(p, identity_field="arbitrary", identity_value="nas"))

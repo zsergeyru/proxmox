@@ -18,7 +18,7 @@ properties:
   deployment:
     type: object
     additionalProperties: false
-    required: [phases, components]
+    required: [phases, components, dependencies]
     properties:
       phases:
         const: [base, services]
@@ -28,6 +28,15 @@ properties:
         uniqueItems: true
         items:
           enum: [urbackup_server, urbackup_client, apps, smb]
+      dependencies:
+        type: object
+        additionalProperties: false
+        properties:
+          urbackup_server: {$ref: '#/$defs/dependency_list'}
+          urbackup_client: {$ref: '#/$defs/dependency_list'}
+          apps: {$ref: '#/$defs/dependency_list'}
+          smb: {$ref: '#/$defs/dependency_list'}
+        required: [urbackup_client]
   services:
     type: object
     minProperties: 1
@@ -47,9 +56,10 @@ properties:
         allOf:
           - $ref: '#/$defs/service'
           - type: object
-            required: [url, image]
+            required: [url, image, runtime]
             properties:
               component: {const: apps}
+              runtime: {$ref: '#/$defs/qbittorrent_runtime'}
               url: {const: 'http://{address}:8080/'}
       urbackup:
         allOf:
@@ -72,6 +82,26 @@ properties:
         volume: {enum: [shared, data]}
         directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
 $defs:
+  qbittorrent_runtime:
+    type: object
+    additionalProperties: false
+    required: [timezone, web_port, torrent_port, downloads_directory, directories]
+    properties:
+      timezone: {type: string, pattern: '^[A-Za-z0-9_+/-]{1,60}$'}
+      web_port: {const: 8080}
+      torrent_port: {type: integer, minimum: 1024, maximum: 65535}
+      downloads_directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
+      directories:
+        type: array
+        minItems: 1
+        maxItems: 12
+        uniqueItems: true
+        items: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}(/[a-z][a-z0-9-]{0,30})?$'}
+  dependency_list:
+    type: array
+    uniqueItems: true
+    maxItems: 3
+    items: {enum: [urbackup_server, urbackup_client, apps, smb]}
   operator:
     type: object
     additionalProperties: false
@@ -93,6 +123,7 @@ $defs:
       title: {type: string, minLength: 1, maxLength: 100}
       component: {enum: [base, urbackup_server, urbackup_client, apps, smb]}
       image: {type: string, pattern: '^lscr[.]io/linuxserver/qbittorrent:[a-zA-Z0-9_.-]+$'}
+      runtime: {$ref: '#/$defs/qbittorrent_runtime'}
       address: {const: auto_omv}
       url:
         type: string

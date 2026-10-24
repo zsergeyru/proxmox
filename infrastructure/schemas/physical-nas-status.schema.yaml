@@ -6,7 +6,8 @@
   "required": [
     "schema_version",
     "host",
-    "checks"
+    "checks",
+    "health"
   ],
   "properties": {
     "schema_version": {
@@ -153,6 +154,20 @@
             }
           }
         ]
+      }
+    },
+    "health": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disk_usage_warning_percent"
+      ],
+      "properties": {
+        "disk_usage_warning_percent": {
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 99
+        }
       }
     }
   }

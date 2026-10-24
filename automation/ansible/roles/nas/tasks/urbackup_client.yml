@@ -3,8 +3,9 @@
   ansible.builtin.assert:
     that:
       - nas_urbackup_schedule is match('^([01][0-9]|2[0-3]):[0-5][0-9]$')
-      - nas_data_mountpoint == '/nas-data'
-      - nas_backup_mountpoint == '/nas-backup'
+      - nas_data_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+      - nas_backup_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+      - nas_data_mountpoint != nas_backup_mountpoint
       - nas_urbackup_client_image == 'uroni/urbackup-client:2.5.31'
       - nas_urbackup_client_name == 'nas-local'
       - nas_urbackup_timezone is match('^[A-Za-z0-9_+/-]+$')

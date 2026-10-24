@@ -12,6 +12,9 @@ deployment:
   phases: [base, services]
   # Keep dependency order: server network -> LAN client -> downloads -> SMB.
   components: [urbackup_server, urbackup_client, apps, smb]
+  # Dependencies are checked before any Ansible task is run.
+  dependencies:
+    urbackup_client: [urbackup_server]
 services:
   openmediavault:
     component: base
@@ -25,6 +28,12 @@ services:
     component: apps
     title: qBittorrent
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
+    runtime:
+      timezone: Etc/UTC
+      web_port: 8080
+      torrent_port: 6881
+      downloads_directory: downloads
+      directories: [downloads, downloads/incomplete, downloads/complete]
     url: "http://{address}:8080/"
     operator:
       username: admin

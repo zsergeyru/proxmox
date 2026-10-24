@@ -253,7 +253,12 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 data = next(volume for volume in verified if volume.role == "data")
                 backup = next(volume for volume in verified if volume.role == "backup")
                 policy = load_nas_backup_policy(repo_root)
-                verify_nas_backup_volumes(policy, verified)
+                verify_nas_backup_volumes(
+                    policy, verified,
+                    expected_pools={
+                        role: host.volumes[role]["pool"] for role in ("data", "backup")
+                    },
+                )
                 run_nas_phase(
                     repo_root, session, "services", provision=provision,
                     policy=policy,

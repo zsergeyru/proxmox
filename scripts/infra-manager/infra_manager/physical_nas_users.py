@@ -13,8 +13,7 @@ from jsonschema import Draft202012Validator
 
 from .common import InfraManagerError
 from .user_catalog import load_user_catalog
-
-_SHARE_NAMES = ("shared", "movies", "music", "data")
+from .physical_nas_ansible import load_nas_provision
 
 
 def validate_nas_access(
@@ -40,7 +39,12 @@ def validate_nas_access(
         raise InfraManagerError(f"NAS access.yaml: {field}: {error.message}")
     assert isinstance(document, dict)
     known_groups = set(catalog["groups"])
-    for share in _SHARE_NAMES:
+    declared = {share["name"] for share in load_nas_provision(repo_root)["shares"]}
+    if set(document["shares"]) != declared:
+        raise InfraManagerError(
+            "Назначения access.yaml не совпадают с папками provision.yaml"
+        )
+    for share in sorted(declared):
         rights = document["shares"][share]
         unknown = (
             set(rights["read_groups"]) | set(rights["write_groups"])
@@ -79,9 +83,8 @@ def require_nas_users_configured(repo_root: Path) -> dict[str, object]:
             "Укажите пользователей в infrastructure/users.yaml до настройки SMB"
         )
     if not any(
-        document["shares"][share]["read_groups"]
-        or document["shares"][share]["write_groups"]
-        for share in _SHARE_NAMES
+        rights["read_groups"] or rights["write_groups"]
+        for rights in document["shares"].values()
     ):
         raise InfraManagerError(
             "Назначьте права в infrastructure/hosts/nas/access.yaml"
