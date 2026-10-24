@@ -143,7 +143,7 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     assert control.index('run_nas_phase(\n                    repo_root, session, "base"') < (
         control.index("verified = verify_nas_volumes(")
     )
-    assert control.index("verify_nas_backup_volumes(policy, verified)") < (
+    assert control.index("verify_nas_backup_volumes(\n") < (
         control.index('run_nas_phase(\n                    repo_root, session, "services"')
     )
 
