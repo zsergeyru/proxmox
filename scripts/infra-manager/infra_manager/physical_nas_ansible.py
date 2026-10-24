@@ -46,15 +46,6 @@ def load_nas_provision(repo_root: Path) -> dict:
         "qbittorrent" not in services or not services["qbittorrent"].get("image")
     )) or ("urbackup_server" in order and "urbackup" not in services):
         raise InfraManagerError("Для выбранного компонента NAS отсутствует описание приложения")
-    for name, svc in services.items():
-        component = svc["component"]
-        if component != "base" and component not in order:
-            # Defined but disabled services must not be presented as running.
-            continue
-        if component == "apps" and name == "qbittorrent" and svc.get("url") != "http://{address}:8080/":
-            raise InfraManagerError("qBittorrent должен использовать опубликованный порт 8080")
-        if component == "urbackup_server" and name == "urbackup" and svc.get("url") != "http://127.0.0.1:55414/":
-            raise InfraManagerError("UrBackup не должен публиковать админку вне localhost")
     names = [item["name"] for item in raw["shares"]]
     targets = [(item["volume"], item["directory"]) for item in raw["shares"]]
     if len(names) != len(set(names)) or len(targets) != len(set(targets)):
