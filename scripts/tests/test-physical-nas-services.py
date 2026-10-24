@@ -76,6 +76,98 @@ def test_shares() -> None:
     )
 
 
+
+def test_omv_shared_folders_use_real_database_uuids() -> None:
+    """OMV выдаёт UUID новых папок; SMB-ссылки используют только эти UUID."""
+
+    folders: list[dict[str, object]] = []
+    resources: list[dict[str, object]] = []
+    settings: dict[str, object] = {"enable": False}
+    updates: list[tuple[str, dict[str, object]]] = []
+    salt_deploys: list[int] = []
+
+    def fake_command(*args: str) -> str:
+        assert args[0] in ("omv-confdbadm", "omv-salt")
+        if args[0] == "omv-salt":
+            assert args == ("omv-salt", "deploy", "run", "samba")
+            salt_deploys.append(1)
+            return ""
+        operation, model = args[1:3]
+        if operation == "read":
+            data = {
+                "conf.system.sharedfolder": folders,
+                "conf.service.smb.share": resources,
+                "conf.service.smb": settings,
+            }[model]
+            return json.dumps(data)
+        assert operation == "update"
+        payload = json.loads(args[3])
+        updates.append((model, payload))
+        if model == "conf.system.sharedfolder":
+            assert "uuid" not in payload
+            assert payload["privileges"] == {"privilege": []}
+            record = {**payload, "uuid": f"00000000-0000-4000-8000-{len(folders)+1:012x}"}
+            folders.append(record)
+        elif model == "conf.service.smb.share":
+            assert "uuid" not in payload
+            assert payload["sharedfolderref"] in {item["uuid"] for item in folders}
+            assert payload["guest"] == "no"
+            resources.append({
+                **payload,
+                "uuid": f"00000000-0000-4000-9000-{len(resources)+1:012x}",
+            })
+        else:
+            assert model == "conf.service.smb"
+            settings.update(payload)
+        return ""
+
+    with (
+        patch.object(shares, "command", side_effect=fake_command),
+        patch.object(shares.Path, "is_mount", return_value=True),
+        patch.object(shares.Path, "is_dir", return_value=True),
+        patch.object(shares.Path, "is_symlink", return_value=False),
+    ):
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        assert len(folders) == 4 and len(resources) == 4
+        assert len(salt_deploys) == 1
+        assert settings["enable"] is True
+        assert [entry["name"] for entry in folders] == [
+            "shared", "movies", "music", "data",
+        ]
+        assert {entry["sharedfolderref"] for entry in resources} == {
+            entry["uuid"] for entry in folders
+        }
+        writes = len(updates)
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        assert len(updates) == writes
+        assert len(salt_deploys) == 1
+        # Частично записанное состояние при повторе не создаёт чужие записи.
+        resources.pop()
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data")
+        assert len(resources) == 4
+        assert len(salt_deploys) == 2
+
+
+def test_omv_cli_failure_never_exposes_stderr() -> None:
+    """Код ошибки содержит лишь этап и числовой rc, не содержимое OMV."""
+
+    from types import SimpleNamespace
+
+    result = SimpleNamespace(
+        returncode=1, stdout="", stderr="SECRET_SHOULD_NOT_APPEAR"
+    )
+    with patch.object(shares.subprocess, "run", return_value=result):
+        try:
+            shares.command(
+                "omv-confdbadm", "update", "conf.system.sharedfolder", "{}"
+            )
+        except shares.ShareError as exc:
+            assert "NAS_SMB_STEP=create-folder RC=1" == str(exc)
+            assert "SECRET_SHOULD_NOT_APPEAR" not in str(exc)
+        else:
+            raise AssertionError("OMV command failure was silently accepted")
+
+
 def test_backup_identifiers() -> None:
     """Основной пул никогда не должен стать собственным приёмником."""
 
@@ -175,6 +267,8 @@ def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
     test_shares()
+    test_omv_shared_folders_use_real_database_uuids()
+    test_omv_cli_failure_never_exposes_stderr()
     test_backup_identifiers()
     test_no_forced_rollback()
     test_qbittorrent_failure_diagnostics()

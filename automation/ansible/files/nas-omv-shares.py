@@ -26,9 +26,19 @@ def command(*args: str) -> str:
         list(args), check=False, text=True, capture_output=True
     )
     if result.returncode:
-        raise ShareError(
-            f"Команда {args[0]} завершилась с кодом {result.returncode}"
-        )
+        # Только постоянные имена операций, без stdout/stderr и аргументов:
+        # сообщение попадёт в консоль оператора через безопасный callback.
+        stages = {
+            ("omv-confdbadm", "read", "conf.system.sharedfolder"): "read-folders",
+            ("omv-confdbadm", "read", "conf.service.smb.share"): "read-shares",
+            ("omv-confdbadm", "read", "conf.service.smb"): "read-settings",
+            ("omv-confdbadm", "update", "conf.system.sharedfolder"): "create-folder",
+            ("omv-confdbadm", "update", "conf.service.smb.share"): "create-share",
+            ("omv-confdbadm", "update", "conf.service.smb"): "enable-smb",
+            ("omv-salt", "deploy", "run"): "apply-samba",
+        }
+        stage = stages.get(tuple(args[:3]), "unknown")
+        raise ShareError(f"NAS_SMB_STEP={stage} RC={result.returncode}")
     return result.stdout
 
 
@@ -107,7 +117,8 @@ def plan_shares(
                 "comment": "Под управлением Infra Manager",
                 "mntentref": ref,
                 "reldirpath": directory + "/",
-                "privileges": [],
+                # OMV 8 ожидает объект со списком privilege, не JSON-массив.
+                "privileges": {"privilege": []},
             }
             missing_folders.append(folder)
         by_name[name] = folder
@@ -180,14 +191,25 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
         raise ShareError("Не найдены общие настройки SMB OpenMediaVault")
 
     for item in missing_folders:
+        # Произвольный UUID для новой записи OMV трактует как ссылку на
+        # существующую запись. Отсутствующий UUID получает специальный
+        # OMV_CONFIGOBJECT_NEW_UUID по умолчанию; база назначает реальный UUID.
         command(
             "omv-confdbadm", "update", "conf.system.sharedfolder",
-            json.dumps(item, ensure_ascii=False),
+            json.dumps({k: v for k, v in item.items() if k != "uuid"},
+                       ensure_ascii=False),
         )
+
+    # Между созданием папок и SMB ОБЯЗАТЕЛЬНО читаем действительные UUID,
+    # выданные OMV. Если запуск ранее оборвался, повтор не создаёт дубликаты.
+    if missing_folders:
+        folders = records("conf.system.sharedfolder")
+    _, missing_smb = plan_shares(shared, data, folders, smb)
     for item in missing_smb:
         command(
             "omv-confdbadm", "update", "conf.service.smb.share",
-            json.dumps(item, ensure_ascii=False),
+            json.dumps({k: v for k, v in item.items() if k != "uuid"},
+                       ensure_ascii=False),
         )
     enabled_before = bool(global_settings.get("enable"))
     if not enabled_before:
