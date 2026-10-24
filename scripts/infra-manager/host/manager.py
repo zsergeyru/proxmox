@@ -143,7 +143,7 @@ def proxy_to_manager(arguments: list[str]) -> int:
         # Физическая цель определяется по имени, без знания конкретного NAS.
         name_of_host = arguments[1]
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from infra_manager_nas_bootstrap import initial_host_access, prompt_nas_smb_password
+        from infra_manager_nas_bootstrap import initial_host_access
 
         trust_result = initial_host_access(name_of_host, forward, OperatorError)
         if trust_result != 0:
@@ -152,7 +152,10 @@ def proxy_to_manager(arguments: list[str]) -> int:
         storage_result = confirm_nas_storage(name_of_host, forward, OperatorError)
         if storage_result != 0:
             return storage_result
-        if (secret_result := prompt_nas_smb_password(name_of_host, forward, OperatorError)):
+        from infra_manager_host_credentials import prompt_physical_credentials
+        if (secret_result := prompt_physical_credentials(
+            name_of_host, forward, OperatorError,
+        )):
             return secret_result
     return forward(arguments)
 def color_mode() -> str:
