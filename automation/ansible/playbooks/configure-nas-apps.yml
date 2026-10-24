@@ -98,9 +98,54 @@
         mode: "0644"
       register: nas_qbit_unit
 
-    - name: Подключить службу qBittorrent после проверки HDD
-      ansible.builtin.systemd_service:
-        name: nas-qbittorrent.service
-        enabled: true
-        daemon_reload: true
-        state: "{{ 'restarted' if (nas_qbit_compose.changed or nas_qbit_unit.changed) else 'started' }}"
+    - name: Проверить корректность Docker Compose qBittorrent
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - /etc/nas-apps/qbittorrent/compose.yml
+          - config
+          - --quiet
+      changed_when: false
+
+    - name: Проверить наличие закреплённого образа qBittorrent на SSD
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ nas_qbit_image }}"]
+      register: nas_qbit_image_present
+      changed_when: false
+      failed_when: false
+
+    # systemd TimeoutStartSec не должен охватывать скачивание первого образа:
+    # на медленной сети оно может продолжаться дольше запуска контейнера.
+    - name: Загрузить образ qBittorrent при отсутствии
+      ansible.builtin.command:
+        argv: [docker, pull, "{{ nas_qbit_image }}"]
+      register: nas_qbit_image_pull
+      changed_when: nas_qbit_image_pull.rc == 0
+      retries: 3
+      delay: 10
+      until: nas_qbit_image_pull.rc == 0
+      when: nas_qbit_image_present.rc != 0
+
+    - name: Запустить qBittorrent с диагностикой при ошибке
+      block:
+        - name: Подключить службу qBittorrent после проверки HDD
+          ansible.builtin.systemd_service:
+            name: nas-qbittorrent.service
+            enabled: true
+            daemon_reload: true
+            state: "{{ 'restarted' if (nas_qbit_compose.changed or nas_qbit_unit.changed) else 'started' }}"
+      rescue:
+        # Только чтение. Произвольный вывод журнала не отправляется в терминал:
+        # callback извлекает лишь заранее разрешённые категории проблем.
+        - name: Прочитать журнал отказа запуска qBittorrent
+          ansible.builtin.command:
+            argv: [journalctl, --unit=nas-qbittorrent.service, --no-pager, --lines=100, --output=cat]
+          register: nas_qbit_error_journal
+          changed_when: false
+          failed_when: false
+
+        - name: Остановить развёртывание после ошибки запуска qBittorrent
+          ansible.builtin.fail:
+            msg: Служба не запущена; подробности классифицированы выше по systemd-журналу
