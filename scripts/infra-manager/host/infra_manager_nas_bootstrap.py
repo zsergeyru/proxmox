@@ -83,5 +83,20 @@ def initial_host_access(name: str, forward, error_type: type[Exception]) -> int:
     del password
     return forward(["bootstrap", name], input_text=payload)
 
+def prompt_nas_smb_password(name: str, forward, error_type: type[Exception]) -> int:
+    """Ask on the trusted PVE terminal, never put a password in CLI arguments."""
+    if name != "nas":
+        return 0
+    if not sys.stdin.isatty():
+        raise error_type("Пароль Samba задаётся при deploy nas в терминале PVE")
+    password = getpass.getpass("Общий пароль Samba для всех пользователей: ")
+    if (not 4 <= len(password) <= 128
+            or any(character in password for character in ("\\n", "\\r", "\\x00"))):
+        raise error_type("Пароль Samba: требуется одна строка длиной от 4 до 128 символов")
+    payload = json.dumps({"password": password}, ensure_ascii=False) + "\n"
+    del password
+    return forward(["smb-password-set", name], input_text=payload)
+
+
 # Совместимость с тестами и ранее установленным именем помощника.
 initial_nas_access = initial_host_access
