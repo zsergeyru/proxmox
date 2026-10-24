@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import uuid
@@ -64,18 +65,34 @@ def _new_uuid() -> str:
     return str(uuid.uuid4())
 
 
-FOLDERS = (
-    ("shared", "shared", "shared"),
-    ("movies", "shared", "movies"),
-    ("music", "shared", "music"),
-    ("data", "data", "data"),
-)
+def validated_folders(value: object) -> tuple[tuple[str, str, str], ...]:
+    """Read only declared relative SMB folders; reject aliases and duplicates."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 16:
+        raise ShareError("Не задан однозначный список папок в provision.yaml")
+    declared: list[tuple[str, str, str]] = []
+    for row in value:
+        if not isinstance(row, dict) or set(row) != {"name", "volume", "directory"}:
+            raise ShareError("Неизвестная структура объявления SMB")
+        name, volume, directory = row["name"], row["volume"], row["directory"]
+        if (
+            not all(isinstance(x, str) for x in (name, volume, directory))
+            or not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", name)
+            or volume not in ("shared", "data")
+            or not re.fullmatch(r"[a-z][a-z0-9-]{0,30}", directory)
+        ):
+            raise ShareError("Недопустимое имя или файловый том SMB")
+        declared.append((name, volume, directory))
+    if (len({row[0] for row in declared}) != len(declared)
+            or len({row[1:] for row in declared}) != len(declared)):
+        raise ShareError("Повторяются имена или расположения SMB")
+    return tuple(declared)
 
 
 def plan_shares(
     shared: str, data: str,
     existing_folders: list[dict[str, object]],
     existing_smb: list[dict[str, object]],
+    folders_plan: tuple[tuple[str, str, str], ...],
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     """Согласовать новые записи до любых изменений OMV."""
 
@@ -84,7 +101,7 @@ def plan_shares(
     missing_smb: list[dict[str, object]] = []
     # Сначала собрать полное соответствие, отклоняя конфликты.
     by_name: dict[str, dict[str, object]] = {}
-    for name, role, directory in FOLDERS:
+    for name, role, directory in folders_plan:
         ref = mapping[role]
         if not ref:
             raise ShareError(f"Для роли {role} не назначен том OMV")
@@ -123,7 +140,7 @@ def plan_shares(
             missing_folders.append(folder)
         by_name[name] = folder
 
-    for name, _role, _directory in FOLDERS:
+    for name, _role, _directory in folders_plan:
         folder_ref = str(by_name[name]["uuid"])
         smb_items = [
             item for item in existing_smb
@@ -166,23 +183,23 @@ def plan_shares(
     return missing_folders, missing_smb
 
 
-def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
+def apply(shared: str, data: str, shared_mount: str, data_mount: str,
+          declarations: object) -> None:
     """Сверить фактические каталоги и изменить только отсутствующие записи."""
 
-    for root, names in (
-        (shared_mount, ("shared", "movies", "music")),
-        (data_mount, ("data",)),
-    ):
-        if not Path(root).is_mount():
+    folders_plan = validated_folders(declarations)
+    roots = {"shared": shared_mount, "data": data_mount}
+    for _name, role, directory in folders_plan:
+        root = Path(roots[role])
+        if not root.is_mount() or root.is_symlink():
             raise ShareError(f"Том {root} не подключён: регистрация SMB остановлена")
-        for name in names:
-            folder = Path(root) / name
-            if not folder.is_dir() or folder.is_symlink():
-                raise ShareError(f"Нет подготовленного каталога: {folder}")
+        folder = root / directory
+        if not folder.is_dir() or folder.is_symlink():
+            raise ShareError(f"Нет подготовленного каталога: {folder}")
 
     folders = records("conf.system.sharedfolder")
     smb = records("conf.service.smb.share")
-    missing_folders, missing_smb = plan_shares(shared, data, folders, smb)
+    missing_folders, missing_smb = plan_shares(shared, data, folders, smb, folders_plan)
 
     global_settings = json.loads(
         command("omv-confdbadm", "read", "conf.service.smb")
@@ -215,7 +232,7 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
     # выданные OMV. Если запуск ранее оборвался, повтор не создаёт дубликаты.
     if missing_folders:
         folders = records("conf.system.sharedfolder")
-    _, missing_smb = plan_shares(shared, data, folders, smb)
+    _, missing_smb = plan_shares(shared, data, folders, smb, folders_plan)
     for item in missing_smb:
         command(
             "omv-confdbadm", "update", "conf.service.smb.share",
@@ -232,6 +249,7 @@ def main() -> int:
     """Разобрать параметры управляющей программы и вернуть безопасную ошибку."""
 
     parser = argparse.ArgumentParser()
+    parser.add_argument("--shares-json", required=True)
     parser.add_argument("--shared-ref", required=True)
     parser.add_argument("--data-ref", required=True)
     parser.add_argument("--shared-mount", required=True)
@@ -239,7 +257,8 @@ def main() -> int:
     args = parser.parse_args()
     try:
         apply(
-            args.shared_ref, args.data_ref, args.shared_mount, args.data_mount
+            args.shared_ref, args.data_ref, args.shared_mount, args.data_mount,
+            json.loads(args.shares_json),
         )
     except (OSError, ValueError, ShareError) as exc:
         print(f"ОШИБКА: {exc}", file=sys.stderr)
