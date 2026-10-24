@@ -23,9 +23,8 @@ from .physical_nas_ansible import load_nas_provision
 from .guest_deploy import project_branch_for_checkout, project_revision as current_project_revision
 
 
-def load_nas_status(repo_root: Path, host_name: str,
-                    provision: dict) -> tuple[dict, ...]:
-    """Validate physical checks, then use the guest's common executor."""
+def _load_nas_status_document(repo_root: Path, host_name: str) -> dict:
+    """Validate the complete physical status contract."""
     location = repo_root / "infrastructure" / "hosts" / host_name / "status.yaml"
     schema_path = repo_root / "infrastructure/schemas/physical-nas-status.schema.yaml"
     try:
@@ -40,6 +39,14 @@ def load_nas_status(repo_root: Path, host_name: str,
             "Небезопасное или некорректное объявление проверки NAS: "
             + ".".join(str(x) for x in errors[0].absolute_path)
         )
+    return raw
+
+
+def load_nas_status(repo_root: Path, host_name: str,
+                    provision: dict) -> tuple[dict, ...]:
+    """Validate physical checks, then use the guest's common executor."""
+    _load_nas_status_document(repo_root, host_name)
+    location = repo_root / "infrastructure" / "hosts" / host_name / "status.yaml"
     checks = load_declared_checks(
         location, identity_field="host", identity_value=host_name,
     )
@@ -54,6 +61,7 @@ def verify_nas_services(
     volumes: Iterable[VerifiedVolume] = (),
 ) -> None:
     """Check hardware and execute common YAML service checks remotely."""
+    health = _load_nas_status_document(repo_root, host_name)["health"]
     for disk in disks:
         report = run(
             session.command("smartctl --json -H " + shlex.quote(disk.path)),
@@ -93,7 +101,7 @@ def verify_nas_services(
             percentage = int(fields[4].rstrip("%"))
         except ValueError as exc:
             raise InfraManagerError("Некорректный процент заполнения NAS") from exc
-        if percentage >= 95:
+        if percentage >= health["disk_usage_warning_percent"]:
             console.warning(f"Мало места на томе {volume.role}: занято {percentage}%")
         else:
             console.ok(f"Том {volume.role}: занято {percentage}%")
