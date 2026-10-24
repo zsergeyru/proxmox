@@ -605,6 +605,22 @@ def _operator_guest_task(
     )
 
 
+def operator_nas_smb_password_set(name: str, payload: str) -> int:
+    """Accept an ephemeral secret only from the trusted PVE stdin channel."""
+    if name != "nas" or len(payload) > 1024 or not payload.endswith("\n"):
+        raise InfraManagerError("Недопустимое имя NAS или ввод пароля Samba")
+    try:
+        value = json.loads(payload)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise InfraManagerError("Повреждён закрытый ввод пароля Samba") from exc
+    if not isinstance(value, dict) or set(value) != {"password"}:
+        raise InfraManagerError("Неверная форма ввода пароля Samba")
+    from .physical_nas_users import store_nas_smb_secret
+    store_nas_smb_secret(value["password"])
+    console.ok("Пароль Samba сохранён в защищённом состоянии 910")
+    return 0
+
+
 def operator_physical_bootstrap_state(name: str) -> int:
     """Запросить пароль только до первого подтверждённого SSH-сертификата."""
 
@@ -780,6 +796,8 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
     bootstrap.add_argument("name")
+    smb_set = subparsers.add_parser("smb-password-set", help=argparse.SUPPRESS)
+    smb_set.add_argument("name")
     for command in ("ssh-trust-plan", "ssh-trust-confirm"):
         trust = subparsers.add_parser(command, help=argparse.SUPPRESS)
         trust.add_argument("name")
@@ -846,6 +864,13 @@ def main(argv: list[str] | None = None) -> int:
             return list_local_guests(PATHS.repo_root)
         if args.command == "hosts":
             return operator_physical_task("hosts", "all")
+        if args.command == "smb-password-set":
+            if not show_secrets or args.name != "nas":
+                raise InfraManagerError("Смена пароля SMB доступна только из доверенного PVE")
+            payload = sys.stdin.readline(1025)
+            if not payload or len(payload) > 1024:
+                raise InfraManagerError("Не получен закрытый ввод пароля Samba")
+            return operator_nas_smb_password_set(args.name, payload)
         if args.command in {"bootstrap", "bootstrap-state"}:
             if not show_secrets:
                 raise InfraManagerError("Начальное доверие доступно только из терминала PVE")
