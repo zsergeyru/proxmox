@@ -1,0 +1,79 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$title: Declarative physical NAS provisioning
+type: object
+additionalProperties: false
+required: [schema_version, host, system, deployment, services, shares]
+properties:
+  schema_version: {const: 1}
+  host: {const: nas}
+  system:
+    type: object
+    additionalProperties: false
+    required: [distribution, version, application, application_version]
+    properties:
+      distribution: {const: debian}
+      version: {const: "13"}
+      application: {const: openmediavault}
+      application_version: {const: "8"}
+  deployment:
+    type: object
+    additionalProperties: false
+    required: [phases, components]
+    properties:
+      phases:
+        const: [base, services]
+      components:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          enum: [urbackup_server, urbackup_client, apps, smb]
+  services:
+    type: object
+    minProperties: 1
+    additionalProperties:
+      $ref: '#/$defs/service'
+    required: [openmediavault]
+  shares:
+    type: array
+    minItems: 1
+    maxItems: 16
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, volume, directory]
+      properties:
+        name: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
+        volume: {enum: [shared, data]}
+        directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
+$defs:
+  operator:
+    type: object
+    additionalProperties: false
+    required: [username]
+    properties:
+      username: {type: string, pattern: '^[a-zA-Z0-9@._-]{1,90}$'}
+      password:
+        type: object
+        additionalProperties: false
+        required: [source, path]
+        properties:
+          source: {const: host_file}
+          path: {const: /etc/nas-apps/urbackup/admin-password}
+  service:
+    type: object
+    additionalProperties: false
+    required: [title, component, operator]
+    properties:
+      title: {type: string, minLength: 1, maxLength: 100}
+      component: {enum: [base, urbackup_server, urbackup_client, apps, smb]}
+      image: {type: string, pattern: '^lscr[.]io/linuxserver/qbittorrent:[a-zA-Z0-9_.-]+$'}
+      address: {const: auto_omv}
+      url:
+        type: string
+        pattern: '^https?://(\\{address\\}|127[.]0[.]0[.]1):[0-9]{2,5}/$'
+      access: {type: string, minLength: 1, maxLength: 200}
+      operator: {$ref: '#/$defs/operator'}
+    oneOf:
+      - required: [address]
+      - required: [url]
