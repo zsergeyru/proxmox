@@ -141,22 +141,10 @@ def proxy_to_manager(arguments: list[str]) -> int:
         restore_manager_python_dependency(vmid, run=run, error_type=OperatorError)
     if len(arguments) == 2 and arguments[0] == "deploy" and not arguments[1].isdecimal():
         # Физическая цель определяется по имени, без знания конкретного NAS.
-        name_of_host = arguments[1]
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from infra_manager_nas_bootstrap import initial_host_access
-
-        trust_result = initial_host_access(name_of_host, forward, OperatorError)
-        if trust_result != 0:
-            return trust_result
-        from infra_manager_nas_storage import confirm_nas_storage
-        storage_result = confirm_nas_storage(name_of_host, forward, OperatorError)
-        if storage_result != 0:
-            return storage_result
-        from infra_manager_host_credentials import prompt_physical_credentials
-        if (secret_result := prompt_physical_credentials(
-            name_of_host, forward, OperatorError,
-        )):
-            return secret_result
+        from infra_manager_host_flow import prepare_physical_host
+        if (result := prepare_physical_host(arguments[1], forward, OperatorError)):
+            return result
     return forward(arguments)
 def color_mode() -> str:
     """Определить, можно ли сохранить цветной вывод при передаче команды."""
