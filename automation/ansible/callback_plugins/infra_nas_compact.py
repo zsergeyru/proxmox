@@ -164,6 +164,47 @@ class CallbackModule(CallbackBase):
         ]
 
     @staticmethod
+    def _urbackup_download_reasons(output: str) -> list[str]:
+        """Распознавать ошибки HTTPS, не раскрывая ответ сервера и URL."""
+        lower = str(output or "").lower()[:20000]
+        known = (
+            (r"name or service not known|temporary failure in name resolution|"
+             r"nodename nor servname provided|could not resolve|"
+             r"getaddrinfo failed",
+             "DNS NAS не разрешает имя сервера установщика UrBackup"),
+            (r"certificate.verify.failed|certificate verification failed|"
+             r"certificate verify failed|unable to get local issuer|"
+             r"self.signed certificate|unknown ca",
+             "NAS не может проверить TLS-сертификат сервера установщика"),
+            (r"ssl.*handshake|tls.*handshake|wrong version number|"
+             r"ssl.*protocol",
+             "Ошибка TLS-соединения NAS с сервером установщика"),
+            (r"connection timed out|read timed out|timed out|timeout",
+             "Превышено время загрузки установщика UrBackup"),
+            (r"network is unreachable|no route to host",
+             "Отсутствует маршрут NAS до сервера загрузки"),
+            (r"connection refused|failed to establish a new connection",
+             "Не удалось установить соединение с сервером загрузки"),
+            (r"http error 404|status code.*404|\b404 not found\b",
+             "Адрес установщика вернул HTTP 404"),
+            (r"http error 403|status code.*403|\b403 forbidden\b",
+             "Сервер установщика отклонил загрузку (HTTP 403)"),
+            (r"http error 429|status code.*429",
+             "Сервер установщика ограничил число запросов (HTTP 429)"),
+            (r"http error 5[0-9][0-9]|status code.*5[0-9][0-9]",
+             "Ошибка HTTP 5xx на сервере установщика"),
+            (r"no space left on device|insufficient space",
+             "Недостаточно места на системном SSD NAS"),
+            (r"permission denied|operation not permitted",
+             "Нет прав для сохранения установщика на NAS"),
+        )
+        result = [description for pattern, description in known if re.search(pattern, lower)]
+        return result[:2] or [
+            "Не удалось скачать официальный установщик; причина не классифицирована "
+            "без вывода потенциально чувствительных деталей"
+        ]
+
+    @staticmethod
     def _apt_hosts(output: str) -> list[str]:
         """Показывать только DNS-имена репозиториев, без userinfo/путей/токенов."""
 
@@ -387,6 +428,10 @@ class CallbackModule(CallbackBase):
                     "[ПРИЧИНА] Регистрация SMB прервана из-за ошибки "
                     "модели OMV, существующего конфликта или неподтверждённого пути"
                 )
+            return
+        if task == "Скачать UrBackup Client 2.5.31 с официального архивного зеркала":
+            for reason in self._urbackup_download_reasons(output):
+                self._display.display("[ПРИЧИНА] " + reason)
             return
         if task == "Загрузить образ qBittorrent при отсутствии":
             for reason in self._qbittorrent_reasons(
