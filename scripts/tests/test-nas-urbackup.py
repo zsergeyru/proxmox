@@ -287,8 +287,12 @@ def test_permanent_docker_client_contract():
     ).read_text()
     status = yaml.safe_load((ROOT / "infrastructure/hosts/nas/status.yaml").read_text())
     assert status["host"] == "nas"
-    assert {"type": "docker", "container": "nas-urbackup-client",
-            "message": "UrBackup Client: контейнер запущен"} in status["checks"]
+    assert any(
+        item.get("type") == "docker"
+        and item.get("component") == "urbackup_client"
+        and item.get("container") == "nas-urbackup-client"
+        for item in status["checks"]
+    )
     assert any(x.get("unit") == "nas-urbackup-client.service"
                for x in status["checks"])
     physical_status = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py").read_text()
