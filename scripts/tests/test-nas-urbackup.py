@@ -296,6 +296,59 @@ def test_permanent_docker_client_contract():
     assert status.count('"nas-urbackup-client.service"') >= 2
 
 
+def test_confirm_client_status_and_server_completed_pointer():
+    """Client browse needs restoration tokens; server current is completion proof."""
+    with patch.object(snapshot, "run", return_value=json.dumps({
+        "servers": [{"name": "172.20.0.2", "internet_connection": False}],
+        "internet_status": "connected_local",
+        "last_backup_time": 0,
+    })) as status:
+        assert snapshot.client_status()["internet_status"] == "connected_local"
+        status.assert_called_once_with(*snapshot.CLIENT, "status")
+    with patch.object(snapshot, "run", return_value="No file backup access tokens found"):
+        refuses(snapshot.client_status, snapshot.SnapshotError)
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td) / "nas-backup" / "urbackup" / "backups"
+        root.mkdir(parents=True)
+        config = {"backup_mount": str(Path(td) / "nas-backup")}
+        assert snapshot.server_current(config) is None
+        client = root / "nas-local"
+        client.mkdir()
+        assert snapshot.server_current(config) is None
+
+        first = client / "261024-0300"
+        (first / "nas-data").mkdir(parents=True)
+        (client / "current").symlink_to(first.name)
+        old = snapshot.server_current(config)
+        assert old == str(first)
+        second = client / "261025-0300"
+        (second / "nas-data").mkdir(parents=True)
+        (client / "current").unlink()
+        (client / "current").symlink_to(second.name)
+        new = snapshot.server_current(config)
+        assert new == str(second) and old != new
+
+        # A new pointer to a completed but wrong/empty backup set is no proof.
+        (second / "nas-data").rmdir()
+        assert snapshot.server_current(config) is None
+
+        # A current symlink must never escape the expected client directory.
+        (client / "current").unlink()
+        (client / "current").symlink_to(root)
+        refuses(lambda: snapshot.server_current(config), snapshot.SnapshotError)
+        (client / "current").unlink()
+
+    source = (
+        ROOT / "automation/ansible/files/nas-urbackup-snapshot.py"
+    ).read_text()
+    assert 'run(*CLIENT, "start", "-f", timeout=21600)' in source
+    assert '"browse"' not in source
+    assert "server_current(config)" in source
+    assert "current != previous" in source
+    assert "time.monotonic() + 1800" in source
+
+
 def test_mount_propagation_requires_verified_state():
     mount = module("nas-urbackup-client-mount.py", "nas_mount_policy_again")
     with tempfile.TemporaryDirectory() as td:
@@ -396,6 +449,7 @@ def main() -> int:
     test_docker_and_deploy_contract()
     test_permanent_docker_client_contract()
     test_mount_propagation_requires_verified_state()
+    test_confirm_client_status_and_server_completed_pointer()
     test_bind_mount_detection_uses_findmnt_not_python_ismount()
     test_staging_mount_is_idempotent()
     test_mount_failure_output_has_no_arbitrary_stderr()
