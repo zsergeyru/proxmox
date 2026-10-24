@@ -102,31 +102,3 @@ def require_nas_smb_secret(document: dict[str, object]) -> str:
     return password
 
 
-def store_nas_smb_secret(
-    password: str, *,
-    directory: Path = Path("/mnt/persistent-state/physical-hosts"),
-) -> None:
-    """Atomically persist trusted PVE input, readable only by infra-runtime UID."""
-    import os
-    import tempfile
-
-    if (not isinstance(password, str) or not 4 <= len(password) <= 128
-            or any(char in password for char in ("\n", "\r", "\x00"))):
-        raise InfraManagerError("Некорректный общий пароль Samba")
-    if directory.is_symlink() or not directory.is_dir():
-        raise InfraManagerError("Нет подтверждённого постоянного каталога NAS на 910")
-    target = directory / "nas-smb-password"
-    if target.is_symlink():
-        raise InfraManagerError("Недопустимая символьная ссылка вместо пароля NAS")
-    fd, temporary = tempfile.mkstemp(prefix=".nas-smb-", dir=directory)
-    try:
-        os.fchmod(fd, 0o600)
-        # infra-runtime runs as uid 1001; the root LXC process writes the file.
-        os.fchown(fd, 1001, 0)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(password + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
