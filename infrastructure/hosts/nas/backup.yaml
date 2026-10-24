@@ -24,6 +24,3 @@ retention:
   keep_weekly: 4
   max_parallel_jobs: 1
   server_state_schedule: "04:30"
-migration:
-  # Старые копии не удаляются из deploy независимо от их наличия.
-  preserve_legacy: true
