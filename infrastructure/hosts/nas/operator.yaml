@@ -1,0 +1,14 @@
+# Host-owned operator prompts and status fields. The controller treats these as data.
+schema_version: 1
+host: nas
+credentials:
+  - id: smb
+    prompt: "Общий пароль Samba для всех пользователей: "
+    min_length: 4
+    max_length: 128
+    status:
+      title: "Samba (SMB)"
+      accounts_source: global_users
+      shares_source: provision
+      share_url: '\\{address}\{name}'
+      permissions: "чтение и запись"
