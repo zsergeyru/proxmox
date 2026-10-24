@@ -1,0 +1,20 @@
+---
+- name: Проверить декларативный план NAS
+  ansible.builtin.assert:
+    that:
+      - nas_deploy_phase in ['base', 'services']
+      - nas_provision.schema_version == 1
+      - nas_provision.host == 'nas'
+      - nas_provision.deployment.phases == ['base', 'services']
+      - nas_provision.deployment.components == ['urbackup_server', 'urbackup_client', 'apps', 'smb']
+      - nas_provision.services.qbittorrent.image is match('^lscr.io/linuxserver/qbittorrent:[A-Za-z0-9_.-]+$')
+    fail_msg: Некорректный или неподдерживаемый декларативный план NAS
+
+- name: Применить базовые пакеты и зависимости NAS
+  ansible.builtin.include_tasks: base.yml
+  when: nas_deploy_phase == 'base'
+
+- name: Применить заявленные компоненты NAS после подтверждения томов
+  ansible.builtin.include_tasks: "{{ item }}.yml"
+  loop: "{{ nas_provision.deployment.components }}"
+  when: nas_deploy_phase == 'services'

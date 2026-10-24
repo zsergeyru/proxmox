@@ -30,7 +30,7 @@ from infra_manager_nas_storage import confirm_nas_storage
 def _load_remote():
     """Прочитать точно тот сценарий, который Ansible установит на NAS."""
 
-    path = ROOT / "automation/ansible/files/nas-storage-prepare.py"
+    path = ROOT / "automation/ansible/roles/nas/files/nas-storage-prepare.py"
     spec = importlib.util.spec_from_file_location("nas_storage_prepare_script", path)
     assert spec and spec.loader
     script = importlib.util.module_from_spec(spec)

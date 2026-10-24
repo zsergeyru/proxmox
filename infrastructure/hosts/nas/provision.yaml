@@ -1,0 +1,38 @@
+# Declarative NAS deployment and operator-facing services.
+# Physical identity and disk layout are in host.yaml/storage.yaml.
+# UrBackup policy and retention stay in backup.yaml.
+schema_version: 1
+host: nas
+system:
+  distribution: debian
+  version: "13"
+  application: openmediavault
+  application_version: "8"
+deployment:
+  phases: [base, services]
+  # Keep dependency order: server network -> LAN client -> downloads -> SMB.
+  components: [urbackup_server, urbackup_client, apps, smb]
+services:
+  openmediavault:
+    title: OpenMediaVault
+    # OMV was installed manually; detect its actual published URL instead
+    # of assuming a working HTTP/HTTPS port or resetting its password.
+    address: auto_omv
+    operator:
+      username: admin
+  qbittorrent:
+    title: qBittorrent
+    image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
+    url: "http://{address}:8080/"
+    operator:
+      username: admin
+  urbackup:
+    title: UrBackup Server
+    # Admin port is intentionally bound to NAS loopback only.
+    url: "http://127.0.0.1:55414/"
+    access: "SSH-туннель к NAS (локальный порт 55414)"
+    operator:
+      username: admin
+      password:
+        source: host_file
+        path: /etc/nas-apps/urbackup/admin-password

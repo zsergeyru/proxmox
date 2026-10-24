@@ -1,24 +1,31 @@
-"""Проверка служб физического NAS после безопасной сверки томов."""
+"""Physical NAS status using common declarative status.yaml and service fields.
 
+Disk identity and ZFS GUID remain fail-closed in the existing host preflight.
+This module checks hardware health then delegates service checks to the SAME
+generic executor as guest status. It contains no application check list.
+"""
 from __future__ import annotations
 
 import json
 import shlex
+from pathlib import Path
 from typing import Iterable
 
 from .physical_storage import DiskInspection
 from .physical_nas_volumes import VerifiedVolume
 from .common import InfraManagerError, console, run
 from .physical_host_ssh import PhysicalHostSshSession
+from .guest_status import load_declared_checks, _run_declared_check, _service_fields
+from .guest_deploy import project_branch_for_checkout, project_revision as current_project_revision
 
 
 def verify_nas_services(
     session: PhysicalHostSshSession,
-    *, disks: Iterable[DiskInspection] = (),
+    *, repo_root: Path, host_name: str,
+    disks: Iterable[DiskInspection] = (),
     volumes: Iterable[VerifiedVolume] = (),
 ) -> None:
-    """Проверить диски и службы; запуск сервера не доказывает наличие копий."""
-
+    """Check hardware and execute common YAML service checks remotely."""
     for disk in disks:
         report = run(
             session.command("smartctl --json -H " + shlex.quote(disk.path)),
@@ -63,88 +70,110 @@ def verify_nas_services(
         else:
             console.ok(f"Том {volume.role}: занято {percentage}%")
 
-    critical = {
-        "docker.service",
-        "nas-urbackup.service",
-        "nas-urbackup-client.service",
-        "nas-urbackup-local.timer",
-    }
-    for name in (
-        "docker.service",
-        "smbd.service",
-        "nas-qbittorrent.service",
-        "nas-urbackup.service",
-        "nas-urbackup-client.service",
-        "nas-urbackup-local.timer",
-        "nas-urbackup-recovery.timer",
-    ):
-        result = run(
-            session.command("systemctl is-active " + name),
-            check=False, capture_output=True,
+
+    path = repo_root / "infrastructure" / "hosts" / host_name / "status.yaml"
+    checks = load_declared_checks(
+        path, identity_field="host", identity_value=host_name,
+    )
+
+    def execute(_node: str, _address: str, argv: list[str], *,
+                capture_output: bool = True):
+        return run(
+            session.command(shlex.join(argv)),
+            check=True, capture_output=capture_output,
         )
-        if result.returncode or result.stdout.strip() != "active":
-            if name in critical:
-                raise InfraManagerError(f"Служба NAS не запущена: {name}")
-            console.warning(f"Необязательная служба NAS не запущена: {name}")
-            continue
-        console.ok(f"Служба {name}: работает")
 
-    container = run(
-        session.command(
-            "docker inspect --format '{{.State.Running}}' nas-qbittorrent"
-        ),
-        check=False, capture_output=True,
-    )
-    if container.returncode or container.stdout.strip() != "true":
-        console.warning("Контейнер qBittorrent не запущен (не влияет на UrBackup)")
-
-    server = run(
-        session.command("docker inspect --format '{{.State.Running}}' nas-urbackup"),
-        check=False, capture_output=True,
-    )
-    if server.returncode or server.stdout.strip() != "true":
-        raise InfraManagerError("UrBackup Server на NAS не работает")
-    console.ok("UrBackup Server: контейнер запущен")
-
-    client = run(
-        session.command("docker inspect --format '{{.State.Running}}' nas-urbackup-client"),
-        check=False, capture_output=True,
-    )
-    if client.returncode or client.stdout.strip() != "true":
-        raise InfraManagerError("UrBackup Client Docker на NAS не работает")
-    console.ok("UrBackup Client Docker: контейнер запущен")
-
-    safety = run(
-        session.command("/usr/local/sbin/nas-urbackup-safe status"),
-        check=False, capture_output=True,
-    )
-    if safety.returncode:
-        raise InfraManagerError("UrBackup: диски или настройка администратора не подтверждены")
-    console.ok("UrBackup: GUID резервного ZFS и доступ подтверждены")
-    recent = run(
-        session.command("systemctl show -p Result --value nas-urbackup-local.service"),
-        check=False, capture_output=True,
-    )
-    started = run(
-        session.command("systemctl show -p ExecMainStartTimestamp --value nas-urbackup-local.service"),
-        check=False, capture_output=True,
-    )
-    if (recent.returncode or recent.stdout.strip() != "success" or
-            started.returncode or started.stdout.strip() in ("", "n/a")):
-        console.warning("Локальное файловое резервирование NAS ещё не подтверждено")
-    else:
-        console.ok("Локальное задание NAS завершилось успешно (проверка восстановления отдельно)")
-    console.warning("История резервных копий UrBackup и пробное восстановление "
-                    "не подтверждаются одним только запуском сервера")
-
-    for pool in ("nas-data", "nas-backup"):
-        result = run(
-            session.command("zpool list -H -o health " + pool),
-            check=False, capture_output=True,
+    for item in checks:
+        _run_declared_check(
+            "", session.host.address or "", item,
+            remote_executor=execute,
         )
-        if result.returncode or result.stdout.strip() != "ONLINE":
-            raise InfraManagerError(f"Пул ZFS {pool} не в состоянии ONLINE")
-        console.ok(f"Пул {pool}: ONLINE")
+        console.ok(str(item["message"]))
 
-    # Старые ZFS-снимки больше не являются критерием готовности UrBackup.
-    # Подробный статус файловых копий будет основан на API/истории сервера.
+
+def _omv_url(session: PhysicalHostSshSession, address: str) -> str:
+    """Use actual OMV webadmin settings; never assume port 80 is configured."""
+    response = run(
+        session.command("omv-confdbadm read conf.system.webadmin"),
+        check=False, capture_output=True,
+    )
+    if response.returncode:
+        return "не удалось определить из OpenMediaVault"
+    try:
+        settings = json.loads(response.stdout)
+    except (ValueError, TypeError):
+        return "не удалось определить из OpenMediaVault"
+    if not isinstance(settings, dict):
+        return "не удалось определить из OpenMediaVault"
+    use_ssl = settings.get("enablessl") is True
+    port = settings.get("sslport" if use_ssl else "port")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        return "не удалось определить из OpenMediaVault"
+    scheme = "https" if use_ssl else "http"
+    return f"{scheme}://{address}:{port}/"
+
+
+def _host_password(session: PhysicalHostSshSession, spec: dict[str, str]) -> str:
+    """Only this explicitly managed root-only credential is publishable."""
+    if spec != {
+        "source": "host_file",
+        "path": "/etc/nas-apps/urbackup/admin-password",
+    }:
+        raise InfraManagerError("Запрещённый источник учётных данных физического сервера")
+    result = run(
+        session.command("cat -- /etc/nas-apps/urbackup/admin-password"),
+        capture_output=True, check=False,
+    )
+    value = result.stdout.strip()
+    if result.returncode or not value or "\n" in value:
+        return "пароль не доступен через доверенный SSH"
+    return value
+
+
+def show_nas_status(
+    repo_root: Path, session: PhysicalHostSshSession,
+    provision: dict, *, project_revision: str | None = None,
+    show_secrets: bool = False,
+) -> None:
+    """Print the same operator-facing sections as show_guest_status()."""
+    address = session.host.address
+    if not address:
+        raise InfraManagerError("Не определён адрес физического сервера")
+    services = provision["services"]
+    separator = "=" * 60
+    print("\n" + separator)
+    print(f"  Физический сервер — {session.host.name}")
+    print(separator)
+    print("\nСистема")
+    print(f"  {'Тип:':<12}Физический сервер")
+    print(f"  {'ОС:':<12}Debian 13 / OpenMediaVault 8")
+    print(f"  {'Адрес:':<12}{address}")
+
+    print("\nПроект")
+    print(f"  {'Ветка:':<12}{project_branch_for_checkout(repo_root)}")
+    print(f"  {'Версия:':<12}{project_revision or current_project_revision(repo_root)}")
+    for name in ("openmediavault", "qbittorrent", "urbackup"):
+        spec = services[name]
+        url = (
+            _omv_url(session, address)
+            if spec.get("address") == "auto_omv"
+            else spec["url"].replace("{address}", address)
+        )
+        svc = {"name": spec["title"], "url": url,
+               "operator": spec.get("operator", {})}
+        fields = _service_fields(
+            "", address, svc, show_secrets=show_secrets,
+            password_resolver=lambda credential: _host_password(session, credential),
+        )
+        if "access" in spec:
+            fields.append(("Доступ", spec["access"]))
+        if "password" not in spec.get("operator", {}):
+            fields.append(("Пароль", "не хранится в конфигурации проекта"))
+        width = max(len(k) for k, _ in fields) + 3
+        print("\n" + spec["title"])
+        for label, value in fields:
+            print(f"  {label + ':':<{width}}{value}")
+
+    print("\n" + separator)
+    print("  NAS готов")
+    print(separator)

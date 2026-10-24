@@ -79,10 +79,10 @@ def test_unconfirmed_volumes() -> None:
 def test_nas_apt_diagnostic_guard() -> None:
     """Ошибка обновления APT должна быть отличима от форматирования HDD."""
 
-    path = ROOT / "automation/ansible/playbooks/configure-nas.yml"
+    path = ROOT / "automation/ansible/roles/nas/tasks/base.yml"
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert isinstance(document, list) and len(document) == 1
-    tasks = document[0]["tasks"]
+    assert isinstance(document, list) and len(document) > 10
+    tasks = document
     package_step = next(item for item in tasks if item.get("name") ==
         "Установить средства диагностики, не изменяя разметку")
     install = package_step["block"][0]["ansible.builtin.apt"]
@@ -152,8 +152,8 @@ def test_nas_apt_diagnostic_guard() -> None:
 def test_zfs_dkms_stays_on_running_kernel_and_precedes_disk_changes() -> None:
     """При отсутствии модуля ставятся точные заголовки без смены ядра."""
 
-    path = ROOT / "automation/ansible/playbooks/configure-nas.yml"
-    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))[0]["tasks"]
+    path = ROOT / "automation/ansible/roles/nas/tasks/base.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
     def step(name: str):
         result = next(task for task in tasks if task.get("name") == name)
         return result, tasks.index(result)
@@ -374,7 +374,7 @@ def test_nas_compact_callback_hides_untrusted_output() -> None:
 def test_omv_repository_fallback_guard_and_rollback() -> None:
     """Сохранять подписи и конфигурацию OMV, блокировать нестандартные источники."""
 
-    source_file = ROOT / "automation/ansible/files/nas-omv-mirror-recover.py"
+    source_file = ROOT / "automation/ansible/roles/nas/files/nas-omv-mirror-recover.py"
     spec = importlib.util.spec_from_file_location("nas_omv_mirror_recovery", source_file)
     assert spec and spec.loader
     script = importlib.util.module_from_spec(spec)

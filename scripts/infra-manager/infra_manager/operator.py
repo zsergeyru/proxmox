@@ -656,7 +656,8 @@ def operator_physical_bootstrap_state(name: str) -> int:
 
 
 def operator_physical_task(
-    operation: str, name: str, *, input_text: str | None = None
+    operation: str, name: str, *, input_text: str | None = None,
+    show_secrets: bool = False,
 ) -> int:
     """Передать штатное действие физической машины из PVE управляющему гостю."""
 
@@ -670,6 +671,7 @@ def operator_physical_task(
         "--user", "1001:0",
         "-e", f"INFRA_MANAGER_COLOR={'1' if console._color(chr(27)) else '0'}",
         "-e", f"INFRA_PVE_NODE={_pve_node()}",
+        "-e", f"INFRA_MANAGER_OPERATOR_SHOW_SECRETS={'1' if show_secrets else '0'}",
         RUNTIME_CONTAINER,
         "sh", "-eu", "-c", RUNTIME_PHYSICAL_SCRIPT,
         "infra-manager-host", snapshot, operation, name,
@@ -697,7 +699,7 @@ def _operator_target(value: str, operation: str, *, show_secrets: bool) -> int:
         raise InfraManagerError(
             "Синхронизация физического сервера не предусмотрена; используйте deploy"
         )
-    return operator_physical_task(operation, value)
+    return operator_physical_task(operation, value, show_secrets=show_secrets)
 
 
 def operator_repair(*, show_secrets: bool) -> int:

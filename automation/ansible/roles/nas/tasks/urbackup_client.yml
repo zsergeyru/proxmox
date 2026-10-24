@@ -1,0 +1,161 @@
+---
+- name: Сверить безопасную политику Docker-клиента
+  ansible.builtin.assert:
+    that:
+      - nas_urbackup_schedule is match('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+      - nas_data_mountpoint == '/nas-data'
+      - nas_backup_mountpoint == '/nas-backup'
+      - nas_urbackup_client_image == 'uroni/urbackup-client:2.5.31'
+      - nas_urbackup_client_name == 'nas-local'
+      - nas_urbackup_timezone is match('^[A-Za-z0-9_+/-]+$')
+    fail_msg: Недостоверная политика Docker-клиента UrBackup
+
+- name: Проверить ZFS до доступа Docker-клиента
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/nas-urbackup-safe, preflight]
+  changed_when: false
+
+- name: Установить проверяемый исполнитель ZFS снимка
+  ansible.builtin.copy:
+    src: nas-urbackup-snapshot.py
+    dest: /usr/local/sbin/nas-urbackup-snapshot
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Установить защиту проброса ZFS монтирований в Docker
+  ansible.builtin.copy:
+    src: nas-urbackup-client-mount.py
+    dest: /usr/local/sbin/nas-urbackup-client-mount
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Создать постоянное состояние клиента на системном SSD
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /var/lib/nas-apps/urbackup/client
+    - /var/lib/nas-apps/urbackup/client/data
+    - /var/lib/nas-apps/urbackup/client/config
+
+- name: Подготовить отдельную shared mount-точку для ZFS снимков
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/nas-urbackup-client-mount, prepare]
+  changed_when: false
+
+- name: Установить только локальные настройки backend UrBackup
+  ansible.builtin.template:
+    src: nas-urbackup-client.defaults.j2
+    dest: /etc/nas-apps/urbackup/client-defaults
+    owner: root
+    group: root
+    mode: "0600"
+  register: nas_urbackup_client_defaults
+
+- name: Записать Compose постоянного клиента в отдельном проекте
+  ansible.builtin.template:
+    src: nas-urbackup-client.compose.yml.j2
+    dest: /etc/nas-apps/urbackup/client-compose.yml
+    owner: root
+    group: root
+    mode: "0600"
+  register: nas_urbackup_client_compose
+
+- name: Проверить безопасную конфигурацию Compose клиента
+  ansible.builtin.command:
+    argv: [docker, compose, -f, /etc/nas-apps/urbackup/client-compose.yml, config, --quiet]
+  changed_when: false
+
+- name: Проверить образ клиента в Docker
+  ansible.builtin.command:
+    argv: [docker, image, inspect, "{{ nas_urbackup_client_image }}"]
+  register: nas_urbackup_client_image_present
+  changed_when: false
+  failed_when: false
+
+- name: Получить закреплённый образ UrBackup Client Docker
+  ansible.builtin.command:
+    argv: [docker, pull, "{{ nas_urbackup_client_image }}"]
+  when: nas_urbackup_client_image_present.rc != 0
+  register: nas_urbackup_client_pulled
+  changed_when: nas_urbackup_client_pulled.rc == 0
+
+- name: Проверить Docker-сеть локального сервера UrBackup
+  ansible.builtin.command:
+    argv: [docker, network, inspect, nas-urbackup-lan]
+  changed_when: false
+
+- name: Установить службу постоянно работающего Docker-клиента
+  ansible.builtin.template:
+    src: nas-urbackup-client.service.j2
+    dest: /etc/systemd/system/nas-urbackup-client.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: nas_urbackup_client_unit
+
+- name: Узнать ранее установленные системные службы
+  ansible.builtin.service_facts:
+
+- name: Остановить прежний native UrBackup Client, если был установлен
+  ansible.builtin.systemd_service:
+    name: urbackupclientbackend.service
+    enabled: false
+    state: stopped
+  when: "'urbackupclientbackend.service' in ansible_facts.services"
+
+- name: Запустить постоянный Docker-клиент UrBackup
+  ansible.builtin.systemd_service:
+    name: nas-urbackup-client.service
+    enabled: true
+    daemon_reload: true
+    state: "{{ 'restarted' if (nas_urbackup_client_compose.changed or nas_urbackup_client_unit.changed or nas_urbackup_client_defaults.changed) else 'started' }}"
+
+- name: Подтвердить доступность backend UrBackup в Docker
+  ansible.builtin.command:
+    argv: [docker, exec, nas-urbackup-client, urbackupclientctl, status]
+  register: nas_urbackup_client_ready
+  retries: 12
+  delay: 5
+  until: nas_urbackup_client_ready.rc == 0
+  changed_when: false
+
+- name: Установить локальное задание резервирования ZFS
+  ansible.builtin.template:
+    src: nas-urbackup-local.service.j2
+    dest: /etc/systemd/system/nas-urbackup-local.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Установить расписание ZFS резервирования
+  ansible.builtin.template:
+    src: nas-urbackup-local.timer.j2
+    dest: /etc/systemd/system/nas-urbackup-local.timer
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Включить задание NAS только после запуска клиента
+  ansible.builtin.systemd_service:
+    name: nas-urbackup-local.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Проверить старый таймер ZFS без изменения его архивов
+  ansible.builtin.stat:
+    path: /etc/systemd/system/nas-zfs-backup.timer
+  register: nas_old_backup_timer
+
+- name: Отключить устаревшее расписание ZFS после настройки UrBackup
+  ansible.builtin.systemd_service:
+    name: nas-zfs-backup.timer
+    enabled: false
+    state: stopped
+  when: nas_old_backup_timer.stat.exists

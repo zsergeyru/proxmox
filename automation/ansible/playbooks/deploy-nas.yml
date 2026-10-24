@@ -1,0 +1,9 @@
+---
+# Single Ansible entrypoint. Python verifies the physical NAS and passes
+# validated runtime identities; all service configuration lives in the role.
+- name: Применить декларативную конфигурацию физического NAS
+  hosts: nas
+  gather_facts: "{{ nas_deploy_phase == 'base' }}"
+  become: false
+  roles:
+    - role: nas

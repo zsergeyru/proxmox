@@ -26,11 +26,9 @@ from .physical_storage_plan import propose_storage, format_storage_plan, observe
 from .physical_nas_storage_state import apply_saved_storage
 from .physical_nas_storage_prepare import prepare_blank_disks, read_pending_recovery
 from .physical_nas_system import read_nas_system, require_omv8
-from .physical_nas_ansible import (
-    configure_nas, configure_nas_apps, configure_nas_urbackup, configure_nas_urbackup_local, configure_nas_smb,
-)
+from .physical_nas_ansible import load_nas_provision, run_nas_phase
 from .physical_nas_backup_policy import load_nas_backup_policy, verify_nas_backup_volumes
-from .physical_nas_status import verify_nas_services
+from .physical_nas_status import verify_nas_services, show_nas_status
 from .physical_nas_volumes import verify_nas_volumes
 from .common import run
 
@@ -242,7 +240,11 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             if operation in {"deploy", "repair"}:
                 require_omv8(system)
                 verify_expected_disks(host.devices, disks)
-                configure_nas(repo_root, session)
+                provision = load_nas_provision(repo_root)
+                run_nas_phase(
+                    repo_root, session, "base", provision=provision,
+                    policy=load_nas_backup_policy(repo_root),
+                )
                 verified = verify_nas_volumes(host, system, session)
                 for volume in verified:
                     console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
@@ -252,36 +254,20 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 backup = next(volume for volume in verified if volume.role == "backup")
                 policy = load_nas_backup_policy(repo_root)
                 verify_nas_backup_volumes(policy, verified)
-                configure_nas_urbackup(
-                    repo_root, session,
-                    source_guid=host.volumes["data"]["pool_guid"],
-                    backup_guid=host.volumes["backup"]["pool_guid"],
-                    data_mountpoint=data.mountpoint,
-                    backup_mountpoint=backup.mountpoint,
+                run_nas_phase(
+                    repo_root, session, "services", provision=provision,
                     policy=policy,
+                    verified_volumes={volume.role: volume for volume in verified},
+                    host_volumes=host.volumes,
                 )
-                configure_nas_urbackup_local(
-                    repo_root, session,
-                    data_mountpoint=data.mountpoint,
-                    backup_mountpoint=backup.mountpoint,
-                    policy=policy,
+                verify_nas_services(
+                    session, repo_root=repo_root, host_name=host.name,
+                    disks=disks, volumes=verified,
                 )
-                configure_nas_apps(
-                    repo_root, session,
-                    shared_mount=shared.mountpoint, shared_uuid=shared_uuid,
-                )
-                configure_nas_smb(
-                    repo_root, session,
-                    shared_mount=shared.mountpoint,
-                    shared_uuid=shared_uuid,
-                    shared_ref=host.volumes["shared"]["omv_reference"],
-                    data_mountpoint=data.mountpoint,
-                    data_ref=host.volumes["data"]["omv_reference"],
-                )
-                verify_nas_services(session, disks=disks, volumes=verified)
-                console.result(
-                    "NAS настроен: OMV, ZFS, SMB, Docker, qBittorrent, "
-                    "UrBackup Server установлен; копии ещё требуют проверки. Данные не форматировались"
+                show_nas_status(
+                    repo_root, session, provision,
+                    project_revision=None,
+                    show_secrets=os.environ.get("INFRA_MANAGER_OPERATOR_SHOW_SECRETS") == "1",
                 )
                 return 0
         expected_serials = {
@@ -307,8 +293,15 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             for volume in verified:
                 console.ok(f"Том {volume.role}: {volume.mountpoint} ({volume.filesystem})")
             with PhysicalHostSshSession(host, pve_node) as connection:
-                verify_nas_services(connection, disks=disks, volumes=verified)
-            console.result("NAS: ОС, SSH, диски, тома и службы проверены")
+                verify_nas_services(
+                    connection, repo_root=repo_root, host_name=host.name,
+                    disks=disks, volumes=verified,
+                )
+                show_nas_status(
+                    repo_root, connection, load_nas_provision(repo_root),
+                    project_revision=None,
+                    show_secrets=os.environ.get("INFRA_MANAGER_OPERATOR_SHOW_SECRETS") == "1",
+                )
         else:
             console.result("Чтение сведений о накопителях NAS завершено без изменений")
         return 0
