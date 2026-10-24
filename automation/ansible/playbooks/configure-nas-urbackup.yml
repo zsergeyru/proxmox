@@ -1,0 +1,206 @@
+---
+- name: Установить сервер UrBackup только на подтверждённом NAS
+  hosts: nas
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Сверить допустимые значения из backup.yaml
+      ansible.builtin.assert:
+        that:
+          - nas_data_pool == 'nas-data'
+          - nas_backup_pool == 'nas-backup'
+          - nas_data_guid is match('^[0-9]{1,20}$')
+          - nas_backup_guid is match('^[0-9]{1,20}$')
+          - nas_data_guid != nas_backup_guid
+          - nas_data_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+          - nas_backup_mountpoint is match('^/[A-Za-z0-9_./-]+$')
+          - nas_urbackup_image is match('^uroni/urbackup-server:[A-Za-z0-9._-]+(@sha256:[0-9a-f]{64})?$')
+          - nas_urbackup_timezone is match('^[A-Za-z0-9_+/-]+$')
+          - nas_urbackup_recovery_schedule is match('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        fail_msg: Недостоверная политика резервирования NAS
+
+    - name: Проверить наличие Docker
+      ansible.builtin.command: [docker, compose, version]
+      changed_when: false
+
+    - name: Создать пользователя сервера UrBackup
+      ansible.builtin.group:
+        name: nas-urbackup
+        system: true
+
+    - name: Создать изолированного пользователя UrBackup
+      ansible.builtin.user:
+        name: nas-urbackup
+        group: nas-urbackup
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Получить идентификатор пользователя
+      ansible.builtin.command: [id, -u, nas-urbackup]
+      register: nas_urbackup_uid
+      changed_when: false
+
+    - name: Получить идентификатор группы
+      ansible.builtin.command: [id, -g, nas-urbackup]
+      register: nas_urbackup_gid
+      changed_when: false
+
+    - name: Создать закрытый каталог конфигурации на системном SSD
+      ansible.builtin.file:
+        path: /etc/nas-apps/urbackup
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Установить программу проверки физических пулов
+      ansible.builtin.copy:
+        src: ../files/nas-urbackup-safe.py
+        dest: /usr/local/sbin/nas-urbackup-safe
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Установить подтверждённые параметры физических томов
+      ansible.builtin.copy:
+        dest: /etc/nas-apps/urbackup/config.json
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          {{ {
+            'source_pool': nas_data_pool,
+            'source_guid': nas_data_guid,
+            'source_mount': nas_data_mountpoint,
+            'backup_pool': nas_backup_pool,
+            'backup_guid': nas_backup_guid,
+            'backup_mount': nas_backup_mountpoint
+          } | to_nice_json }}
+
+    - name: Проверить GUID и реальные точки подключения до записи
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, preflight]
+      changed_when: false
+
+    - name: Подготовить только собственные каталоги состояния NAS
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /var/lib/nas-apps
+        - /var/lib/nas-apps/urbackup
+
+    - name: Создать рабочее состояние UrBackup на системном SSD
+      ansible.builtin.file:
+        path: /var/lib/nas-apps/urbackup/server
+        state: directory
+        owner: nas-urbackup
+        group: nas-urbackup
+        mode: "0750"
+
+    - name: Разрешить службе UrBackup проход к своему каталогу без доступа к recovery
+      ansible.builtin.file:
+        path: "{{ nas_backup_mountpoint }}/urbackup"
+        state: directory
+        owner: root
+        group: nas-urbackup
+        mode: "0710"
+
+    - name: Назначить права только новому собственному каталогу файлов UrBackup
+      ansible.builtin.file:
+        path: "{{ nas_backup_mountpoint }}/urbackup/backups"
+        state: directory
+        owner: nas-urbackup
+        group: nas-urbackup
+        mode: "0750"
+
+    - name: Записать проверенное описание Docker Compose
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup.compose.yml.j2
+        dest: /etc/nas-apps/urbackup/compose.yml
+        owner: root
+        group: root
+        mode: "0600"
+      register: nas_urbackup_compose
+
+    - name: Подготовить резервные папки строго на проверенном ZFS
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, prepare]
+      changed_when: false
+
+    - name: Проверить Docker Compose перед запуском
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /etc/nas-apps/urbackup/compose.yml, config, --quiet]
+      changed_when: false
+
+    - name: Подтвердить доступность закреплённого образа
+      ansible.builtin.command:
+        argv: [docker, image, inspect, "{{ nas_urbackup_image }}"]
+      register: nas_urbackup_image_present
+      changed_when: false
+      failed_when: false
+
+    - name: Получить образ UrBackup при отсутствии
+      ansible.builtin.command:
+        argv: [docker, pull, "{{ nas_urbackup_image }}"]
+      when: nas_urbackup_image_present.rc != 0
+      register: nas_urbackup_pulled
+      changed_when: nas_urbackup_pulled.rc == 0
+
+    - name: Инициализировать закрытого администратора до открытия сервера
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, init-admin]
+      no_log: true
+      changed_when: false
+
+    - name: Установить проверяемую службу UrBackup Server
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup.service.j2
+        dest: /etc/systemd/system/nas-urbackup.service
+        owner: root
+        group: root
+        mode: "0644"
+      register: nas_urbackup_unit
+
+    - name: Запустить сервер UrBackup
+      ansible.builtin.systemd_service:
+        name: nas-urbackup.service
+        enabled: true
+        daemon_reload: true
+        state: "{{ 'restarted' if (nas_urbackup_compose.changed or nas_urbackup_unit.changed) else 'started' }}"
+
+    - name: Установить исполнитель обычной копии состояния UrBackup
+      ansible.builtin.copy:
+        src: ../files/nas-urbackup-recovery.py
+        dest: /usr/local/sbin/nas-urbackup-recovery
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Установить службу сохранения состояния UrBackup
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup-recovery.service.j2
+        dest: /etc/systemd/system/nas-urbackup-recovery.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Установить расписание сохранения состояния UrBackup
+      ansible.builtin.template:
+        src: ../templates/nas-urbackup-recovery.timer.j2
+        dest: /etc/systemd/system/nas-urbackup-recovery.timer
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Включить автономное копирование базы UrBackup
+      ansible.builtin.systemd_service:
+        name: nas-urbackup-recovery.timer
+        enabled: true
+        daemon_reload: true
+        state: started
+
+    - name: Подтвердить закрытый локальный статус
+      ansible.builtin.command: [/usr/local/sbin/nas-urbackup-safe, status]
+      changed_when: false
