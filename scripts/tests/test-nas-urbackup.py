@@ -26,7 +26,7 @@ from infra_manager.physical_nas_backup_policy import (
 
 def module(path: str, name: str):
     spec = importlib.util.spec_from_file_location(
-        name, ROOT / "automation/ansible/files" / path
+        name, ROOT / "automation/ansible/roles/nas/files" / path
     )
     assert spec and spec.loader, path
     result = importlib.util.module_from_spec(spec)
@@ -145,10 +145,10 @@ def test_scripts_have_no_destructive_fallback():
                        "docker volume prune"):
             assert unsafe not in text, (file, unsafe)
     assert snapshot.STAGING.as_posix().startswith("/run/")
-    assert "recovery-key" not in (ROOT / "automation/ansible/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
-    assert "AES" not in (ROOT / "automation/ansible/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
+    assert "recovery-key" not in (ROOT / "automation/ansible/roles/nas/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
+    assert "AES" not in (ROOT / "automation/ansible/roles/nas/files/nas-urbackup-recovery.py").read_text(encoding="utf-8")
     assert "confirmed" in (
-        ROOT / "automation/ansible/files/nas-urbackup-snapshot.py"
+        ROOT / "automation/ansible/roles/nas/files/nas-urbackup-snapshot.py"
     ).read_text(encoding="utf-8")
 
 
@@ -181,33 +181,32 @@ def test_plain_state_archive_verification():
 
 def test_docker_and_deploy_contract():
     folder = ROOT / "automation/ansible"
-    compose = (folder / "templates/nas-urbackup.compose.yml.j2").read_text()
+    compose = (folder / "roles/nas/templates/nas-urbackup.compose.yml.j2").read_text()
     assert "create_host_path: false" in compose
     assert '127.0.0.1:55414' in compose
     assert '127.0.0.1:55413:55413/tcp' in compose
     assert '"55413:55413/tcp"' not in compose
     assert 'restart: "no"' in compose
     assert "/var/urbackup" in compose
-    unit = (folder / "templates/nas-urbackup.service.j2").read_text()
+    unit = (folder / "roles/nas/templates/nas-urbackup.service.j2").read_text()
     assert "ExecStartPre=" in unit and "nas-urbackup-safe preflight" in unit
     assert "RequiresMountsFor=" in unit
     operations = (
         ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
     ).read_text()
-    assert "configure_nas_urbackup_local" in operations
+    assert "run_nas_phase(" in operations
     assert "configure_nas_backups(" not in operations
     assert "load_nas_backup_policy" in operations
-    playbook = (folder / "playbooks/configure-nas-urbackup.yml").read_text()
+    playbook = (folder / "roles/nas/tasks/urbackup_server.yml").read_text()
     assert 'group: nas-urbackup' in playbook
     assert 'mode: "0710"' in playbook
-    safe = (folder / "files/nas-urbackup-safe.py").read_text()
+    safe = (folder / "roles/nas/files/nas-urbackup-safe.py").read_text()
     assert "if PASSWORD.exists():" in safe
     assert "O_EXCL" in safe
-    for name in ("configure-nas-urbackup.yml", "configure-nas-urbackup-client.yml"):
-        plays = yaml.safe_load((folder / "playbooks" / name).read_text())
-        assert isinstance(plays, list)
-        for play in plays:
-            for task in play.get("tasks", []):
+    for name in ("urbackup_server.yml", "urbackup_client.yml"):
+        tasks = yaml.safe_load((folder / "roles/nas/tasks" / name).read_text())
+        assert isinstance(tasks, list)
+        for task in tasks:
                 args = task.get("ansible.builtin.command")
                 if args is not None:
                     # YAML принимает список как значение модуля, но Ansible
@@ -224,18 +223,18 @@ def test_permanent_docker_client_contract():
     """Ни скачивания хостового клиента, ни проброса физических дисков."""
     folder = ROOT / "automation/ansible"
     play = yaml.safe_load(
-        (folder / "playbooks/configure-nas-urbackup-client.yml").read_text()
-    )[0]
-    steps = play["tasks"]
+        (folder / "roles/nas/tasks/urbackup_client.yml").read_text()
+    )
+    steps = play
     descriptions = " ".join(task["name"] for task in steps)
     assert "Скачать" not in descriptions
     assert "установщик" not in descriptions.lower()
     assert all("ansible.builtin.get_url" not in task for task in steps)
     assert "nas-urbackup-client.service" in str(steps)
     assert "urbackupclientbackend.service" in str(steps)  # disable legacy only
-    server_compose = (folder / "templates/nas-urbackup.compose.yml.j2").read_text()
+    server_compose = (folder / "roles/nas/templates/nas-urbackup.compose.yml.j2").read_text()
     client_compose = (
-        folder / "templates/nas-urbackup-client.compose.yml.j2"
+        folder / "roles/nas/templates/nas-urbackup-client.compose.yml.j2"
     ).read_text()
     assert "nas-urbackup-lan" in server_compose
     assert "nas-urbackup-lan" in client_compose
@@ -243,7 +242,7 @@ def test_permanent_docker_client_contract():
     assert 'command: ["--config", "/etc/default/urbackupclient"]' in client_compose
     assert "source: /etc/nas-apps/urbackup/client-defaults" in client_compose
     client_defaults = (
-        folder / "templates/nas-urbackup-client.defaults.j2"
+        folder / "roles/nas/templates/nas-urbackup-client.defaults.j2"
     ).read_text()
     assert "INTERNET_ONLY=false" in client_defaults
     assert "RESTORE=disabled" in client_defaults
@@ -264,11 +263,11 @@ def test_permanent_docker_client_contract():
     mount = module("nas-urbackup-client-mount.py", "nas_mount_policy_test")
     assert mount.STAGING.as_posix() == "/run/nas-urbackup-source"
     source = (
-        folder / "files/nas-urbackup-client-mount.py"
+        folder / "roles/nas/files/nas-urbackup-client-mount.py"
     ).read_text(encoding="utf-8")
     assert "mount" in source and "--make-rshared" in source
     assert "--bind" in source
-    snapshot_script = (folder / "files/nas-urbackup-snapshot.py").read_text()
+    snapshot_script = (folder / "roles/nas/files/nas-urbackup-snapshot.py").read_text()
     assert 'MOUNT = STAGING / "current"' in snapshot_script
     assert 'GUEST_SOURCE = "/backup-source/current"' in snapshot_script
     assert '("docker", "exec", "nas-urbackup-client", "urbackupclientctl")' in snapshot_script
@@ -276,7 +275,7 @@ def test_permanent_docker_client_contract():
     assert "os.path.ismount(str(MOUNT))" in snapshot_script
     assert 'run(MOUNT_GUARD, "check")' in snapshot_script
     client_unit = (
-        folder / "templates/nas-urbackup-client.service.j2"
+        folder / "roles/nas/templates/nas-urbackup-client.service.j2"
     ).read_text()
     assert "RequiresMountsFor=" in client_unit
     assert "nas-urbackup-safe preflight" in client_unit
@@ -284,16 +283,17 @@ def test_permanent_docker_client_contract():
     assert "nas-urbackup.service" in client_unit
     assert "BindsTo=nas-urbackup.service" in client_unit
     assert "nas-urbackup-client.service" in (
-        folder / "templates/nas-urbackup-local.service.j2"
+        folder / "roles/nas/templates/nas-urbackup-local.service.j2"
     ).read_text()
-    status = (
-        ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py"
-    ).read_text()
-    assert 'nas-urbackup-client.service' in status
-    assert 'docker inspect --format' in status
-    assert 'nas-urbackup-client' in status
-    assert '"urbackupclientbackend.service"' not in status
-    assert status.count('"nas-urbackup-client.service"') >= 2
+    status = yaml.safe_load((ROOT / "infrastructure/hosts/nas/status.yaml").read_text())
+    assert status["host"] == "nas"
+    assert {"type": "docker", "container": "nas-urbackup-client",
+            "message": "UrBackup Client: контейнер запущен"} in status["checks"]
+    assert any(x.get("unit") == "nas-urbackup-client.service"
+               for x in status["checks"])
+    physical_status = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py").read_text()
+    assert "load_declared_checks(" in physical_status
+    assert "_run_declared_check(" in physical_status
 
 
 def test_confirm_client_status_and_server_completed_pointer():
@@ -340,7 +340,7 @@ def test_confirm_client_status_and_server_completed_pointer():
         (client / "current").unlink()
 
     source = (
-        ROOT / "automation/ansible/files/nas-urbackup-snapshot.py"
+        ROOT / "automation/ansible/roles/nas/files/nas-urbackup-snapshot.py"
     ).read_text()
     assert 'run(*CLIENT, "start", "-f", timeout=21600)' in source
     assert '"browse"' not in source
