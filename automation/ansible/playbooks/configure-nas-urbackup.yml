@@ -101,6 +101,14 @@
         group: nas-urbackup
         mode: "0750"
 
+    - name: Разрешить службе UrBackup проход к своему каталогу без доступа к recovery
+      ansible.builtin.file:
+        path: "{{ nas_backup_mountpoint }}/urbackup"
+        state: directory
+        owner: root
+        group: nas-urbackup
+        mode: "0710"
+
     - name: Назначить права только новому собственному каталогу файлов UrBackup
       ansible.builtin.file:
         path: "{{ nas_backup_mountpoint }}/urbackup/backups"
