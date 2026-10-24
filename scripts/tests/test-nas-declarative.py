@@ -153,11 +153,14 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
         tasks = yaml.safe_load((prefix / "roles/nas/tasks" / name).read_text())
         assert isinstance(tasks, list) and len(tasks) > 4, name
     control = (
-        ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
+        ROOT / "scripts/infra-manager/drivers/omv8.py"
     ).read_text()
     assert "run_nas_phase(" in control
     assert "configure_nas_urbackup(" not in control
     assert "configure_nas_smb(" not in control
+    core = (ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py").read_text()
+    assert "run_nas_phase" not in core
+    assert "physical_nas" not in core
     assert control.index('run_nas_phase(\n                    repo_root, session, "base"') < (
         control.index("verified = verify_nas_volumes(")
     )
@@ -220,7 +223,7 @@ def test_nas_smb_password_only_in_trusted_status() -> None:
     with (
         patch("infra_manager.physical_nas_status.project_branch_for_checkout", return_value="main"),
         patch("infra_manager.physical_nas_status.current_project_revision", return_value="test"),
-        patch("infra_manager.physical_nas_users.require_nas_smb_secret",
+        patch("infra_manager.physical_host_credentials.read_operator_secret",
               return_value="unit-test-secret") as read_secret,
     ):
         output = io.StringIO()
