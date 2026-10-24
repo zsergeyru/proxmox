@@ -33,6 +33,10 @@ DECLARED_SHARES = yaml.safe_load(
     (ROOT / "infrastructure/hosts/nas/provision.yaml").read_text()
 )["shares"]
 backup = module("nas-zfs-backup.py", "nas_zfs_backup_test")
+ACCESS = yaml.safe_load(
+    (ROOT / "infrastructure/hosts/nas/access.yaml").read_text()
+)
+GUEST = {"mode": ACCESS["mode"], "shares": ACCESS["shares"]}
 
 
 def refusal(callback, error_type: type[Exception]) -> None:
@@ -46,43 +50,65 @@ def refusal(callback, error_type: type[Exception]) -> None:
 
 
 def test_shares() -> None:
-    """Не выдавать гостевой доступ и не переиспользовать чужую папку."""
-
-    assert len(shares.validated_folders(DECLARED_SHARES)) == 4
-    refusal(lambda: shares.validated_folders([{"name": "../etc", "volume": "data", "directory": "etc"}]), shares.ShareError)
-    refusal(lambda: shares.validated_folders([{"name": "x", "volume": "unknown", "directory": "x"}]), shares.ShareError)
-    refusal(lambda: shares.validated_folders([{"name": "x", "volume": "data", "directory": "x"}] * 2), shares.ShareError)
-    folders, smb = shares.plan_shares("shared-ref", "data-ref", [], [], shares.validated_folders(DECLARED_SHARES))
+    """Only explicitly declared guest-only shares can be published."""
+    plan = shares.validated_folders(DECLARED_SHARES)
+    assert len(plan) == 4
+    refusal(lambda: shares.validated_folders([
+        {"name": "../etc", "volume": "data", "directory": "etc"}
+    ]), shares.ShareError)
+    refusal(lambda: shares.validated_folders([
+        {"name": "x", "volume": "backup", "directory": "x"}
+    ]), shares.ShareError)
+    refusal(lambda: shares.validated_folders([
+        {"name": "x", "volume": "data", "directory": "x"}
+    ] * 2), shares.ShareError)
+    for invalid in (
+        {"mode": "authenticated", "shares": GUEST["shares"]},
+        {"mode": "guest_only", "shares": {"shared": {"access": "read_write"}}},
+        {"mode": "guest_only", "shares": {
+            **GUEST["shares"], "backup": {"access": "read_write"}
+        }},
+        {"mode": "guest_only", "shares": {
+            **GUEST["shares"], "shared": {"access": "read_only"}
+        }},
+    ):
+        refusal(lambda invalid=invalid: shares.validated_access(invalid, plan), shares.ShareError)
+    folders, smb = shares.plan_shares(
+        "shared-ref", "data-ref", [], [], plan, GUEST,
+    )
     assert len(folders) == 4 and len(smb) == 4
     assert {folder["name"] for folder in folders} == {
         "shared", "movies", "music", "data"
     }
-    assert all(item["guest"] == "no" for item in smb)
+    assert all(item["guest"] == "only" and item["readonly"] is False for item in smb)
     assert all(item["enable"] is True for item in smb)
-    existing = [{
-        "uuid": "existing-uuid",
-        "name": "shared",
-        "mntentref": "wrong",
-        "reldirpath": "shared/",
+    foreign = [{
+        "uuid": "existing-uuid", "name": "shared",
+        "mntentref": "wrong", "reldirpath": "shared/",
     }]
     refusal(
-        lambda: shares.plan_shares("shared-ref", "data-ref", existing, [], shares.validated_folders(DECLARED_SHARES)),
-        shares.ShareError,
+        lambda: shares.plan_shares(
+            "shared-ref", "data-ref", foreign, [], plan, GUEST,
+        ), shares.ShareError,
     )
     correct = [{
-        "uuid": "existing-uuid",
-        "name": "shared",
-        "mntentref": "shared-ref",
-        "reldirpath": "shared/",
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "name": "shared", "mntentref": "shared-ref", "reldirpath": "shared/",
     }]
-    guests = [{
-        "uuid": "smb-uuid", "sharedfolderref": "existing-uuid", "guest": "allow"
+    old = [{
+        "uuid": "00000000-0000-4000-9000-000000000001",
+        "sharedfolderref": correct[0]["uuid"],
+        "guest": "no", "readonly": True, "enable": False,
+        "comment": "preserve",
     }]
-    refusal(
-        lambda: shares.plan_shares("shared-ref", "data-ref", correct, guests, shares.validated_folders(DECLARED_SHARES)),
-        shares.ShareError,
+    _folders, desired = shares.plan_shares(
+        "shared-ref", "data-ref", correct, old, plan, GUEST,
     )
-
+    adjusted = next(x for x in desired if x.get("uuid") == old[0]["uuid"])
+    assert adjusted["guest"] == "only"
+    assert adjusted["readonly"] is False
+    assert adjusted["enable"] is True
+    assert adjusted["comment"] == "preserve"
 
 
 def test_omv_shared_folders_use_real_database_uuids() -> None:
@@ -119,13 +145,17 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
             record = {**payload, "uuid": f"00000000-0000-4000-8000-{len(folders)+1:012x}"}
             folders.append(record)
         elif model == "conf.service.smb.share":
-            assert "uuid" not in payload
             assert payload["sharedfolderref"] in {item["uuid"] for item in folders}
-            assert payload["guest"] == "no"
-            resources.append({
-                **payload,
-                "uuid": f"00000000-0000-4000-9000-{len(resources)+1:012x}",
-            })
+            assert payload["guest"] == "only" and payload["readonly"] is False
+            if "uuid" in payload:
+                match = [item for item in resources if item["uuid"] == payload["uuid"]]
+                assert len(match) == 1
+                match[0].update(payload)
+            else:
+                resources.append({
+                    **payload,
+                    "uuid": f"00000000-0000-4000-9000-{len(resources)+1:012x}",
+                })
         else:
             assert model == "conf.service.smb"
             resources[:] = list(payload.get("shares", {}).get("share", []))
@@ -139,7 +169,7 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         patch.object(shares.Path, "is_dir", return_value=True),
         patch.object(shares.Path, "is_symlink", return_value=False),
     ):
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, GUEST)
         assert len(folders) == 4 and len(resources) == 4
         assert len(salt_deploys) == 1
         assert settings["enable"] is True
@@ -149,20 +179,28 @@ def test_omv_shared_folders_use_real_database_uuids() -> None:
         assert {entry["sharedfolderref"] for entry in resources} == {
             entry["uuid"] for entry in folders
         }
+        # Converge a pre-existing authenticated share without removing its UUID.
+        resources[0]["guest"] = "no"
+        resources[0]["readonly"] = True
+        original_uuid = resources[0]["uuid"]
+        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, GUEST)
+        assert resources[0]["uuid"] == original_uuid
+        assert resources[0]["guest"] == "only" and resources[0]["readonly"] is False
+        assert len(salt_deploys) == 2
         writes = len(updates)
         shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(updates) == writes
-        assert len(salt_deploys) == 1
+        assert len(salt_deploys) == 2
         # Частично записанное состояние при повторе не создаёт чужие записи.
         resources.pop()
         shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(resources) == 4
-        assert len(salt_deploys) == 2
+        assert len(salt_deploys) == 3
         # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
         settings["enable"] = False
         shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES)
         assert len(resources) == 4
-        assert len(salt_deploys) == 3
+        assert len(salt_deploys) == 4
 
 
 def test_omv_cli_failure_never_exposes_stderr() -> None:
@@ -294,6 +332,11 @@ def test_samba_service_automation() -> None:
     assert "Прочитать журнал отказа Samba" in content
     assert "Прервать настройку при ошибке службы Samba" in content
     assert "/etc/samba/smb.conf" not in content
+    assert "nas_access_policy.mode == 'guest_only'" in content
+    assert "u:nobody:rwx,d:u:nobody:rwx" in content
+    assert content.index("Разрешить гостю чтение") < (
+        content.index("Зарегистрировать папки и ресурсы через базу OMV")
+    )
 
 
 def test_samba_safe_error_hints() -> None:
