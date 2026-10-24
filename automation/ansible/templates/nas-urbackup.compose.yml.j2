@@ -1,0 +1,27 @@
+# Развёртывание через infra-manager; самостоятельный Docker restart запрещён.
+services:
+  urbackup:
+    image: "{{ nas_urbackup_image }}"
+    container_name: nas-urbackup
+    environment:
+      PUID: "{{ nas_urbackup_uid.stdout }}"
+      PGID: "{{ nas_urbackup_gid.stdout }}"
+      TZ: "{{ nas_urbackup_timezone }}"
+    volumes:
+      - type: bind
+        source: "{{ nas_backup_mountpoint }}/urbackup/backups"
+        target: /backups
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /var/lib/nas-apps/urbackup/server
+        target: /var/urbackup
+        bind:
+          create_host_path: false
+    ports:
+      # Admin GUI only via localhost/SSH forwarding until HTTPS gateway is provisioned.
+      - "127.0.0.1:55414:55414/tcp"
+      - "55413:55413/tcp"
+      - "55415:55415/tcp"
+      - "35623:35623/udp"
+    restart: "no"
