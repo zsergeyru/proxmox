@@ -26,7 +26,7 @@ Linux-пользователи создаются только при отсут
 install -d -m 0700 /mnt/bindmounts/infra-state/physical-hosts
 umask 077
 read -r -s -p 'Пароль Samba: ' NAS_SMB_PASSWORD; echo
-printf '%s\\n' "$NAS_SMB_PASSWORD" > /mnt/bindmounts/infra-state/physical-hosts/nas-smb-password
+printf '%s\n' "$NAS_SMB_PASSWORD" > /mnt/bindmounts/infra-state/physical-hosts/nas-smb-password
 unset NAS_SMB_PASSWORD
 chmod 0600 /mnt/bindmounts/infra-state/physical-hosts/nas-smb-password
 ```
