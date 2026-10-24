@@ -300,13 +300,89 @@ def test_mount_propagation_requires_verified_state():
         source = Path(td) / "staging"
         source.mkdir()
         with patch.object(mount, "STAGING", source), patch.object(
-            mount.os.path, "ismount", return_value=False
-        ), patch.object(mount, "run", return_value=""):
+            mount, "is_mountpoint", return_value=False
+        ):
             refuses(mount.check, mount.MountError)
 
     assert "uroni/urbackup-client:2.5.31" == load_nas_backup_policy(
         ROOT
     )["local_client"]["image"]
+
+
+def test_bind_mount_detection_uses_findmnt_not_python_ismount():
+    """A bind mount on its own filesystem is not reliably detected by os.path."""
+    mount = module("nas-urbackup-client-mount.py", "nas_bind_detection_test")
+    with patch.object(mount.subprocess, "run", return_value=SimpleNamespace(
+        returncode=0, stdout=str(mount.STAGING) + "\n"
+    )) as subprocess_run, patch.object(
+        mount.os.path, "ismount", side_effect=AssertionError("do not use ismount")
+    ):
+        assert mount.is_mountpoint() is True
+        subprocess_run.assert_called_once_with(
+            ("findmnt", "-n", "-M", str(mount.STAGING), "-o", "TARGET"),
+            capture_output=True, text=True, timeout=30,
+        )
+    with patch.object(mount.subprocess, "run", return_value=SimpleNamespace(
+        returncode=1, stdout=""
+    )):
+        assert mount.is_mountpoint() is False
+    with patch.object(mount.subprocess, "run", return_value=SimpleNamespace(
+        returncode=32, stdout=""
+    )):
+        refuses(mount.is_mountpoint, mount.MountError)
+
+
+def test_staging_mount_is_idempotent():
+    """Existing same-filesystem bind must not produce another nested mount."""
+    mount = module("nas-urbackup-client-mount.py", "nas_idempotent_mount_test")
+    with tempfile.TemporaryDirectory() as td:
+        source = Path(td) / "staging"
+        commands = []
+        def fake_run(*args):
+            commands.append(args)
+            if args[0] == "findmnt":
+                return "shared"
+            return ""
+        with patch.object(mount, "STAGING", source), patch.object(
+            mount, "run", side_effect=fake_run
+        ), patch.object(
+            mount, "is_mountpoint", side_effect=[False, True, True, True]
+        ):
+            mount.prepare()
+            mount.prepare()
+        bind_commands = [args for args in commands if args[:2] == ("mount", "--bind")]
+        assert bind_commands == [("mount", "--bind", str(source), str(source))]
+        assert commands.count(("mount", "--make-rshared", str(source))) == 2
+
+    with tempfile.TemporaryDirectory() as td:
+        source = Path(td) / "staging"
+        source.mkdir()
+        (source / "unexpected.txt").write_text("must be preserved")
+        with patch.object(mount, "STAGING", source), patch.object(
+            mount, "run", return_value=""
+        ), patch.object(mount, "is_mountpoint", return_value=False):
+            refuses(mount.prepare, mount.MountError)
+        assert (source / "unexpected.txt").read_text() == "must be preserved"
+
+
+def test_mount_failure_output_has_no_arbitrary_stderr():
+    mount = module("nas-urbackup-client-mount.py", "nas_mount_error_test")
+    with patch.object(mount.subprocess, "run", return_value=SimpleNamespace(
+        returncode=32, stdout="password=TOP_SECRET", stderr="token=TOP_SECRET"
+    )):
+        try:
+            mount.run("mount", "--bind", "/run/test", "/run/test")
+        except mount.MountError as exc:
+            assert exc.stage == "bind"
+            assert "TOP_SECRET" not in str(exc)
+        else:
+            raise AssertionError("Mount command failure was accepted")
+    callback = (
+        ROOT / "automation/ansible/callback_plugins/infra_nas_compact.py"
+    ).read_text(encoding="utf-8")
+    assert "NAS_URBACKUP_MOUNT_STAGE=" in callback
+    assert "not-shared" in callback
+
 
 
 def main() -> int:
@@ -318,6 +394,9 @@ def main() -> int:
     test_docker_and_deploy_contract()
     test_permanent_docker_client_contract()
     test_mount_propagation_requires_verified_state()
+    test_bind_mount_detection_uses_findmnt_not_python_ismount()
+    test_staging_mount_is_idempotent()
+    test_mount_failure_output_has_no_arbitrary_stderr()
     print("[ОК] NAS UrBackup: политика, GUID, безопасность и новые задания")
     return 0
 

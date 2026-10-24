@@ -429,6 +429,31 @@ class CallbackModule(CallbackBase):
                     "модели OMV, существующего конфликта или неподтверждённого пути"
                 )
             return
+        if task == "Подготовить отдельную shared mount-точку для ZFS снимков":
+            # Root-owned helper prints ONLY a fixed stage code. Never expose
+            # arbitrary stdout/stderr from Ansible or the mount utilities.
+            match = re.search(
+                r"NAS_URBACKUP_MOUNT_STAGE=(preflight|directory|occupied|"
+                r"inspect|bind|propagation|missing|not-shared)(?:\\b|$)",
+                output,
+            )
+            stages = {
+                "preflight": "Проверка GUID или подключений ZFS не прошла",
+                "directory": "Недопустимый или недоступный каталог staging в /run",
+                "occupied": "Каталог staging не пуст: не скрываем данные монтированием",
+                "inspect": "Не удалось проверить mountpoint командой findmnt",
+                "bind": "Не удалось создать bind mount staging",
+                "propagation": "Не удалось включить mount propagation shared",
+                "missing": "Монтирование staging отсутствует в таблице mountpoint",
+                "not-shared": "Staging смонтирован, но propagation не shared",
+            }
+            self._display.display(
+                "[ПРИЧИНА] " + (
+                    stages[match.group(1)] if match else
+                    "Ошибка подготовки ZFS staging; безопасный код причины отсутствует"
+                )
+            )
+            return
         if task == "Скачать UrBackup Client 2.5.31 с официального архивного зеркала":
             for reason in self._urbackup_download_reasons(output):
                 self._display.display("[ПРИЧИНА] " + reason)
