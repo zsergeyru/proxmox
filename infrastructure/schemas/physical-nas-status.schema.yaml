@@ -1,59 +1,159 @@
-$schema: https://json-schema.org/draft/2020-12/schema
-$title: Declarative physical NAS service health checks
-type: object
-additionalProperties: false
-required: [schema_version, host, checks]
-properties:
-  schema_version: {const: 2}
-  host: {const: nas}
-  checks:
-    type: array
-    minItems: 1
-    items:
-      oneOf:
-        - $ref: '#/$defs/systemd'
-        - $ref: '#/$defs/docker'
-        - $ref: '#/$defs/tcp'
-        - $ref: '#/$defs/file'
-$defs:
-  component:
-    enum: [base, urbackup_server, urbackup_client, apps, smb]
-  fields:
-    type: object
-    additionalProperties: false
-    required: [type, message, component]
-    properties:
-      message: {type: string, minLength: 1, maxLength: 150}
-      component: {$ref: '#/$defs/component'}
-  systemd:
-    allOf:
-      - $ref: '#/$defs/fields'
-      - type: object
-        required: [unit]
-        properties:
-          type: {const: systemd}
-          unit: {type: string, pattern: '^[a-zA-Z0-9_.@-]+[.]service$|^[a-zA-Z0-9_.@-]+[.]timer$'}
-  docker:
-    allOf:
-      - $ref: '#/$defs/fields'
-      - type: object
-        required: [container]
-        properties:
-          type: {const: docker}
-          container: {type: string, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.-]+$'}
-  tcp:
-    allOf:
-      - $ref: '#/$defs/fields'
-      - type: object
-        required: [port]
-        properties:
-          type: {const: tcp}
-          port: {type: integer, minimum: 1, maximum: 65535}
-  file:
-    allOf:
-      - $ref: '#/$defs/fields'
-      - type: object
-        required: [path]
-        properties:
-          type: {const: file}
-          path: {const: /etc/nas-apps/urbackup/initialized}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$title": "Physical NAS service checks",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "host",
+    "checks"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "host": {
+      "const": "nas"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "message",
+              "component",
+              "unit"
+            ],
+            "properties": {
+              "type": {
+                "const": "systemd"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "component": {
+                "enum": [
+                  "base",
+                  "urbackup_server",
+                  "urbackup_client",
+                  "apps",
+                  "smb"
+                ]
+              },
+              "unit": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_.@-]+[.](service|timer)$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "message",
+              "component",
+              "container"
+            ],
+            "properties": {
+              "type": {
+                "const": "docker"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "component": {
+                "enum": [
+                  "base",
+                  "urbackup_server",
+                  "urbackup_client",
+                  "apps",
+                  "smb"
+                ]
+              },
+              "container": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]+$"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "message",
+              "component",
+              "port"
+            ],
+            "properties": {
+              "type": {
+                "const": "tcp"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "component": {
+                "enum": [
+                  "base",
+                  "urbackup_server",
+                  "urbackup_client",
+                  "apps",
+                  "smb"
+                ]
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "message",
+              "component",
+              "path"
+            ],
+            "properties": {
+              "type": {
+                "const": "file"
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "component": {
+                "enum": [
+                  "base",
+                  "urbackup_server",
+                  "urbackup_client",
+                  "apps",
+                  "smb"
+                ]
+              },
+              "path": {
+                "const": "/etc/nas-apps/urbackup/initialized"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
