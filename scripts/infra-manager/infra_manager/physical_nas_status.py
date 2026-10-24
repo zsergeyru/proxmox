@@ -74,7 +74,7 @@ def verify_nas_services(
         "smbd.service",
         "nas-qbittorrent.service",
         "nas-urbackup.service",
-        "urbackupclientbackend.service",
+        "nas-urbackup-client.service",
         "nas-urbackup-local.timer",
         "nas-urbackup-recovery.timer",
     ):
