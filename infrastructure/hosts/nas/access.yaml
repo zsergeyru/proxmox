@@ -1,8 +1,11 @@
-# SMB on the physical NAS: anonymous guest-only, full read/write on declared
-# shared folders. This does NOT affect OMV/SSH/Authelia authentication.
-# UrBackup backup directories are not shared by provision.yaml.
-schema_version: 2
-mode: guest_only
+# Windows-compatible authenticated Samba access for users in infrastructure/users.yaml.
+# Never store the password, an NT hash or encrypted password in Git.
+# The credential is stored in protected persistent Infra Manager state on 910.
+schema_version: 3
+mode: named_users
+credential:
+  source: controller_file
+  path: /mnt/persistent-state/physical-hosts/nas-smb-password
 shares:
   shared: {access: read_write}
   movies: {access: read_write}
