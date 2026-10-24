@@ -63,6 +63,13 @@ def main() -> int:
         children = run("zfs", "list", "-H", "-o", "name", "-r", ds).splitlines()
         if children != [ds]:
             raise SnapshotError("Обнаружены дочерние ZFS datasets: нужна согласованная схема")
+        if STAGING.is_symlink() or (STAGING.exists() and
+                                   os.path.ismount(str(STAGING))):
+            raise SnapshotError("Временная точка ZFS уже занята — проверить прошлое задание")
+        old_snapshots = run("zfs", "list", "-H", "-t", "snapshot",
+                            "-o", "name", "-r", ds)
+        if any(name.startswith(ds + "@urbackup-") for name in old_snapshots.splitlines()):
+            raise SnapshotError("Сохранился снимок незавершённого задания; нельзя создавать новый")
         previous = list_backups()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         name = "urbackup-" + stamp + "-" + str(os.getpid())
@@ -79,9 +86,6 @@ def main() -> int:
             source_snapshot = Path(src) / ".zfs" / "snapshot" / name
             if not source_snapshot.is_dir():
                 raise SnapshotError("ZFS snapshot недоступен для чтения")
-            if STAGING.is_symlink() or (STAGING.exists() and
-                                       os.path.ismount(str(STAGING))):
-                raise SnapshotError("Точка UrBackup уже занята")
             STAGING.mkdir(mode=0o700, exist_ok=True)
             run("mount", "--bind", str(source_snapshot), str(STAGING))
             mounted = True
