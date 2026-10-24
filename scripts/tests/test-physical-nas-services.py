@@ -63,7 +63,7 @@ def test_shares() -> None:
         {"name": "x", "volume": "data", "directory": "x"}
     ] * 2), shares.ShareError)
     for invalid in (
-        {"mode": "named_users", "shares": ACCESS_POLICY["shares"]},
+        {"mode": "guest_only", "shares": ACCESS_POLICY["shares"]},
         {"mode": "named_users", "shares": {"shared": {"access": "read_write"}}},
         {"mode": "named_users", "shares": {
             **ACCESS_POLICY["shares"], "backup": {"access": "read_write"}
