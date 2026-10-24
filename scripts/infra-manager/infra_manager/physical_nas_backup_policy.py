@@ -35,16 +35,26 @@ def load_nas_backup_policy(repo_root: Path) -> dict[str, object]:
     return policy
 
 
-def verify_nas_backup_volumes(policy: dict[str, object], volumes: tuple) -> tuple[str, str]:
-    """Проверять роли через штатный verify_nas_volumes; не принимать обычные папки."""
+def verify_nas_backup_volumes(
+    policy: dict[str, object], volumes: tuple,
+    *, expected_pools: dict[str, str],
+) -> tuple[str, str]:
+    """Сверить источники с подтверждёнными именами ZFS-пулов из storage.yaml."""
     by_role = {v.role: v for v in volumes}
     if set(by_role) != {"shared", "data", "backup"}:
         raise InfraManagerError("Невозможно подтвердить все диски NAS")
-    source = by_role[policy["local_client"]["source_volume"]]
-    target = by_role[policy["local_client"]["target_volume"]]
+    if (set(expected_pools) != {"data", "backup"}
+            or any(not re.fullmatch(r"nas-[a-z0-9-]+", pool)
+                   for pool in expected_pools.values())
+            or expected_pools["data"] == expected_pools["backup"]):
+        raise InfraManagerError("Нет подтверждённых двух разных ZFS-пулов NAS")
+    source_role = policy["local_client"]["source_volume"]
+    target_role = policy["local_client"]["target_volume"]
+    source = by_role[source_role]
+    target = by_role[target_role]
     if (source.mountpoint == target.mountpoint or
-            source.source.split("/", 1)[0] != "nas-data" or
-            target.source.split("/", 1)[0] != "nas-backup" or
+            source.source.split("/", 1)[0] != expected_pools[source_role] or
+            target.source.split("/", 1)[0] != expected_pools[target_role] or
             source.filesystem != "zfs" or target.filesystem != "zfs"):
         raise InfraManagerError("Неверные источники резервирования NAS")
     return source.mountpoint, target.mountpoint
