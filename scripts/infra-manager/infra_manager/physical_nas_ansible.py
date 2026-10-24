@@ -36,11 +36,20 @@ def load_nas_provision(repo_root: Path) -> dict:
         )
     components = raw["deployment"]["components"]
     order = set(components)
-    if "urbackup_client" in order and (
-        "urbackup_server" not in order
-        or components.index("urbackup_server") > components.index("urbackup_client")
-    ):
-        raise InfraManagerError("UrBackup Client требует ранее объявленный Server")
+    dependencies = raw["deployment"]["dependencies"]
+    # This is a non-removable safety dependency; YAML can add requirements
+    # but cannot silently allow a client without its trusted local server.
+    if dependencies.get("urbackup_client") != ["urbackup_server"]:
+        raise InfraManagerError("UrBackup Client обязан зависеть от локального Server")
+    for component, required in dependencies.items():
+        if component not in order:
+            continue
+        for dependency in required:
+            if (dependency == component or dependency not in order
+                    or components.index(dependency) >= components.index(component)):
+                raise InfraManagerError(
+                    f"Нарушена зависимость {component} от {dependency}"
+                )
     services = raw["services"]
     if ("apps" in order and (
         "qbittorrent" not in services or not services["qbittorrent"].get("image")
