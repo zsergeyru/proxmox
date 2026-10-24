@@ -12,6 +12,9 @@ deployment:
   phases: [base, services]
   # Keep dependency order: server network -> LAN client -> downloads -> SMB.
   components: [urbackup_server, urbackup_client, apps, smb]
+  # Dependencies are checked before any Ansible task is run.
+  dependencies:
+    urbackup_client: [urbackup_server]
 services:
   openmediavault:
     component: base
