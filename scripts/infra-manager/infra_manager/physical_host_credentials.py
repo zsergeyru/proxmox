@@ -81,7 +81,7 @@ def _secret_path(host: str, credential_id: str, *, root: Path | None = None) -> 
 def validate_secret(password: str, spec: dict) -> None:
     if (not isinstance(password, str)
             or not spec["min_length"] <= len(password) <= spec["max_length"]
-            or any(c in password for c in ("\\n", "\\r", "\\x00"))):
+            or any(c in password for c in ("\n", "\r", "\x00"))):
         raise InfraManagerError("Пароль не соответствует требованиям объявления")
 
 
