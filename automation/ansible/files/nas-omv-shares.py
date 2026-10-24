@@ -190,6 +190,17 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
     if not isinstance(global_settings, dict):
         raise ShareError("Не найдены общие настройки SMB OpenMediaVault")
 
+    enabled_before = bool(global_settings.get("enable"))
+    if not enabled_before:
+        # В OMV conf.service.smb включает вложенный список shares.share.
+        # Обновление старого снимка ПОСЛЕ создания записей стерло бы их.
+        # Сначала включаем службу, затем создаём недостающие SMB-ресурсы.
+        global_settings["enable"] = True
+        command(
+            "omv-confdbadm", "update", "conf.service.smb",
+            json.dumps(global_settings, ensure_ascii=False),
+        )
+
     for item in missing_folders:
         # Произвольный UUID для новой записи OMV трактует как ссылку на
         # существующую запись. Отсутствующий UUID получает специальный
@@ -210,13 +221,6 @@ def apply(shared: str, data: str, shared_mount: str, data_mount: str) -> None:
             "omv-confdbadm", "update", "conf.service.smb.share",
             json.dumps({k: v for k, v in item.items() if k != "uuid"},
                        ensure_ascii=False),
-        )
-    enabled_before = bool(global_settings.get("enable"))
-    if not enabled_before:
-        global_settings["enable"] = True
-        command(
-            "omv-confdbadm", "update", "conf.service.smb",
-            json.dumps(global_settings, ensure_ascii=False),
         )
     if missing_folders or missing_smb or not enabled_before:
         command("omv-salt", "deploy", "run", "samba")
