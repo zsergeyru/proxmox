@@ -292,6 +292,8 @@ def test_permanent_docker_client_contract():
     assert 'nas-urbackup-client.service' in status
     assert 'docker inspect --format' in status
     assert 'nas-urbackup-client' in status
+    assert '"urbackupclientbackend.service"' not in status
+    assert status.count('"nas-urbackup-client.service"') >= 2
 
 
 def test_mount_propagation_requires_verified_state():
