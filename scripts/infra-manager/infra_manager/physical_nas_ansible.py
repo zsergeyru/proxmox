@@ -5,14 +5,12 @@ one role, two guarded phases and a checked provision.yaml contract.
 """
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator
 
-from .common import InfraManagerError, console, run
+from .common import InfraManagerError
 from .physical_host_ssh import PhysicalHostSshSession
 
 
@@ -116,34 +114,10 @@ def run_nas_phase(
             "nas_backup_guid": host_volumes["backup"]["pool_guid"],
             "nas_backup_mountpoint": backup.mountpoint,
         })
-    key, ssh_args = session.ansible_parameters()
-    variables.update({
-        "ansible_host": session.host.address,
-        "ansible_ssh_common_args": ssh_args,
-        "ansible_python_interpreter": "/usr/bin/python3",
-    })
-    env = os.environ.copy()
-    env.update({
-        "ANSIBLE_HOST_KEY_CHECKING": "True",
-        "ANSIBLE_RETRY_FILES_ENABLED": "False",
-        "ANSIBLE_LOG_PATH": "/dev/null",
-        "ANSIBLE_SSH_TRANSFER_METHOD": "piped",
-        "ANSIBLE_STDOUT_CALLBACK": "infra_nas_compact",
-        "ANSIBLE_CALLBACK_PLUGINS": str(
-            repo_root / "automation" / "ansible" / "callback_plugins"
-        ),
-        "ANSIBLE_DISPLAY_SKIPPED_HOSTS": "False",
-        "ANSIBLE_DEPRECATION_WARNINGS": "False",
-        "ANSIBLE_NOCOLOR": "1",
-    })
-    console.info("Применение конфигурации NAS: deploy-nas.yml (" + phase + ")")
-    result = run([
-        "ansible-playbook", str(playbook), "-i", str(inventory),
-        "-u", session.host.user, "--private-key", key,
-        "-e", json.dumps(variables),
-    ], env=env, cwd=repo_root, stream_output=True, check=False)
-    if result.returncode:
-        raise InfraManagerError(
-            f"Декларативный Ansible NAS ({phase}) завершился с ошибкой "
-            f"({result.returncode}); диски не форматировались"
-        )
+    # The physical host controller knows no NAS commands: all execution
+    # is centralized in the same allowlisted Ansible transport.
+    from .physical_host_ansible import run_physical_ansible
+    run_physical_ansible(
+        repo_root, session, variables=variables, phase=phase,
+        callback="infra_nas_compact",
+    )
