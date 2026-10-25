@@ -236,8 +236,8 @@ def show_nas_status(
             _omv_url(session, address)
             if spec.get("address") == "auto_omv"
             else spec["url"].replace("{address}", address).replace(
-                "{web_port}", str(spec.get("runtime", {}).get("web_port", "")),
-            )
+                "{web_port}", str(spec["runtime"]["web_port"]),
+            ) if "runtime" in spec else spec["url"].replace("{address}", address)
         )
         if "{web_bind}" in url or "{web_port}" in url:
             if backup_server is None:
