@@ -124,6 +124,9 @@ def test_live_guard_is_read_only():
             "source_mount": str(src),
             "backup_pool": "nas-backup", "backup_guid": "456",
             "backup_mount": str(dest),
+            "backup_subdir": "urbackup/backups",
+            "client_container": "nas-urbackup-client",
+            "client_name": "nas-local",
         }
         cfg.write_text(json.dumps(good), encoding="utf-8")
         def fake_call(*args):
@@ -192,7 +195,9 @@ def test_docker_and_deploy_contract():
     folder = ROOT / "automation/ansible"
     compose = (folder / "roles/nas/templates/nas-urbackup.compose.yml.j2").read_text()
     assert "create_host_path: false" in compose
-    assert '127.0.0.1:55414' in compose
+    assert "nas_backup_policy.server.web_bind" in compose
+    assert "nas_backup_policy.server.web_port" in compose
+    assert "nas_backup_policy.server.name" in compose
     assert '127.0.0.1:55413:55413/tcp' in compose
     assert '"55413:55413/tcp"' not in compose
     assert 'restart: "no"' in compose
@@ -246,6 +251,7 @@ def test_permanent_docker_client_contract():
         folder / "roles/nas/templates/nas-urbackup-client.compose.yml.j2"
     ).read_text()
     assert "nas-urbackup-lan" in server_compose
+    assert "nas_backup_policy.local_client.container" in client_compose
     assert "nas-urbackup-lan" in client_compose
     assert "external: true" in client_compose
     assert 'command: ["--config", "/etc/default/urbackupclient"]' in client_compose
@@ -279,7 +285,7 @@ def test_permanent_docker_client_contract():
     snapshot_script = (folder / "roles/nas/files/nas-urbackup-snapshot.py").read_text()
     assert 'MOUNT = STAGING / "current"' in snapshot_script
     assert 'GUEST_SOURCE = "/backup-source/current"' in snapshot_script
-    assert '("docker", "exec", "nas-urbackup-client", "urbackupclientctl")' in snapshot_script
+    assert 'return ("docker", "exec", name, "urbackupclientctl")' in snapshot_script
     assert '"/usr/local/bin/urbackupclientctl"' not in snapshot_script
     assert "os.path.ismount(str(MOUNT))" in snapshot_script
     assert 'run(MOUNT_GUARD, "check")' in snapshot_script
@@ -316,15 +322,20 @@ def test_confirm_client_status_and_server_completed_pointer():
         "internet_status": "connected_local",
         "last_backup_time": 0,
     })) as status:
-        assert snapshot.client_status()["internet_status"] == "connected_local"
-        status.assert_called_once_with(*snapshot.CLIENT, "status")
+        cfg = {"client_container": "nas-urbackup-client"}
+        assert snapshot.client_status(cfg)["internet_status"] == "connected_local"
+        status.assert_called_once_with(*snapshot.client_command(cfg), "status")
     with patch.object(snapshot, "run", return_value="No file backup access tokens found"):
-        refuses(snapshot.client_status, snapshot.SnapshotError)
+        refuses(lambda: snapshot.client_status(cfg), snapshot.SnapshotError)
 
     with tempfile.TemporaryDirectory() as td:
         root = Path(td) / "nas-backup" / "urbackup" / "backups"
         root.mkdir(parents=True)
-        config = {"backup_mount": str(Path(td) / "nas-backup")}
+        config = {
+            "backup_mount": str(Path(td) / "nas-backup"),
+            "backup_subdir": "urbackup/backups",
+            "client_name": "nas-local",
+        }
         assert snapshot.server_current(config) is None
         client = root / "nas-local"
         client.mkdir()
@@ -355,7 +366,7 @@ def test_confirm_client_status_and_server_completed_pointer():
     source = (
         ROOT / "automation/ansible/roles/nas/files/nas-urbackup-snapshot.py"
     ).read_text()
-    assert 'run(*CLIENT, "start", "-f", timeout=21600)' in source
+    assert 'run(*client_command(config), "start", "-f", timeout=21600)' in source
     assert '"browse"' not in source
     assert "server_current(config)" in source
     assert "current != previous" in source
