@@ -67,6 +67,7 @@ def test_provision_and_fail_closed_phases() -> None:
         check_modified(lambda d: d["deployment"].update(phases=["services", "base"]))
         check_modified(lambda d: d["services"]["urbackup"].update(url="http://0.0.0.0:55414/"))
         check_modified(lambda d: d["services"]["qbittorrent"].update(image="untrusted:latest"))
+        check_modified(lambda d: d["services"]["qbittorrent"].update(container_name="unexpected"))
         check_modified(lambda d: d["services"]["qbittorrent"]["runtime"].update(
             torrent_port=22
         ))
@@ -181,10 +182,18 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
 def test_shared_status_parser_and_secret_control() -> None:
     p = ROOT / "infrastructure/hosts/nas/status.yaml"
     checks = load_nas_status(ROOT, "nas", load_nas_provision(ROOT))
-    assert checks == load_declared_checks(p, identity_field="host", identity_value="nas")
+    raw_checks = load_declared_checks(p, identity_field="host", identity_value="nas")
+    assert len(checks) == len(raw_checks)
+    assert [(x["type"], x["component"], x["message"]) for x in checks] == [
+        (x["type"], x["component"], x["message"]) for x in raw_checks
+    ]
+    assert any(c.get("port") == load_nas_provision(ROOT)["services"]["qbittorrent"]["runtime"]["web_port"]
+               for c in checks if c["type"] == "tcp")
+    assert all("container_ref" not in c and "port_ref" not in c for c in checks)
     assert len(checks) >= 5
     assert _load_nas_status_document(ROOT, "nas")["health"]["disk_usage_warning_percent"] == 95
     assert any(item.get("container") == "nas-urbackup-client" for item in checks)
+    assert any(item.get("container") == "nas-qbittorrent" for item in checks)
     refuses(lambda: load_declared_checks(p, identity_field="host", identity_value="other"))
     refuses(lambda: load_declared_checks(p, identity_field="arbitrary", identity_value="nas"))
     reduced = copy.deepcopy(load_nas_provision(ROOT))
