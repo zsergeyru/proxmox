@@ -118,6 +118,286 @@
   loop_control:
     label: "{{ item.role }}"
 
+- name: Обнаружить только устойчивые ссылки на настоящие физические диски
+  ansible.builtin.find:
+    paths: /dev/disk/by-id
+    file_type: link
+    recurse: false
+    patterns:
+      - 'ata-*'
+      - 'scsi-*'
+  register: physical_preparation_byid_links
+
+- name: Проверить, что для каждого HDD есть устойчивый путь без номера раздела
+  ansible.builtin.assert:
+    that:
+      - matches | length > 0
+    fail_msg: Для HDD {{ item.role }} отсутствует однозначная ссылка /dev/disk/by-id
+  vars:
+    matches: >-
+      {{ physical_preparation_byid_links.files
+         | selectattr('path', 'search', item.serial)
+         | rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_preparation_tree.stdout }}"
+    stdin_add_newline: false
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+  changed_when: false
+
+- name: Проверить отсутствие разделов и файловых систем на дисках для создания
+  ansible.builtin.assert:
+    that:
+      - disk | length == 1
+      - disk[0].children is not defined or not disk[0].children
+      - disk[0].pttype | default(none) is none
+      - disk[0].fstype | default(none) is none
+      - disk[0].uuid | default(none) is none
+      - not (disk[0].mountpoints | default([], true) | reject('none') | list)
+    fail_msg: HDD {{ item.role }} уже содержит разметку, ФС или монтирование
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить отсутствие скрытых сигнатур без записи на HDD
+  ansible.builtin.command:
+    argv:
+      - wipefs
+      - --no-act
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_wipefs
+  changed_when: false
+
+- name: Убедиться, что на новых дисках нет скрытых сигнатур
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == ''
+    fail_msg: Обнаружена старая сигнатура на {{ item.item.role }}; запись запрещена
+  loop: "{{ physical_preparation_wipefs.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Независимо обследовать каждый новый диск через blkid
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -p
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_blkid
+  failed_when: false
+  changed_when: false
+
+- name: Отказать, если blkid обнаружил данные либо ошибку чтения
+  ansible.builtin.assert:
+    that:
+      - item.rc == 2
+      - item.stdout | trim == ''
+    fail_msg: HDD {{ item.item.role }} не доказан пустым через blkid
+  loop: "{{ physical_preparation_blkid.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Отказать при существующем ZFS-пуле с заявленным именем
+  ansible.builtin.command:
+    argv: [zpool, list, -H, -o, name, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_pool
+  failed_when: false
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Не допускать конфликта имён ZFS-пулов
+  ansible.builtin.assert:
+    that:
+      - item.rc == 1
+      - item.stdout | trim == ''
+    fail_msg: Пул {{ item.item.pool }} уже существует либо его состояние неоднозначно
+  loop: "{{ physical_preparation_pool.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Подтвердить, что проверка была исключительно читающей
+  ansible.builtin.debug:
+    msg: >-
+      Все физические диски и скрытые сигнатуры проверены,
+      но подготовка не запущена: этот Ansible-этап
+      не размечает и не форматирует HDD.
+)
+         | list }}
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Разрешить реальные устройства, на которые ссылается by-id
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, "{{ item.path }}"]
+  loop: >-
+    {{ physical_preparation_byid_links.files
+       | rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_preparation_tree.stdout }}"
+    stdin_add_newline: false
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+  changed_when: false
+
+- name: Проверить отсутствие разделов и файловых систем на дисках для создания
+  ansible.builtin.assert:
+    that:
+      - disk | length == 1
+      - disk[0].children is not defined or not disk[0].children
+      - disk[0].pttype | default(none) is none
+      - disk[0].fstype | default(none) is none
+      - disk[0].uuid | default(none) is none
+      - not (disk[0].mountpoints | default([], true) | reject('none') | list)
+    fail_msg: HDD {{ item.role }} уже содержит разметку, ФС или монтирование
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить отсутствие скрытых сигнатур без записи на HDD
+  ansible.builtin.command:
+    argv:
+      - wipefs
+      - --no-act
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_wipefs
+  changed_when: false
+
+- name: Убедиться, что на новых дисках нет скрытых сигнатур
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == ''
+    fail_msg: Обнаружена старая сигнатура на {{ item.item.role }}; запись запрещена
+  loop: "{{ physical_preparation_wipefs.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Независимо обследовать каждый новый диск через blkid
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -p
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_blkid
+  failed_when: false
+  changed_when: false
+
+- name: Отказать, если blkid обнаружил данные либо ошибку чтения
+  ansible.builtin.assert:
+    that:
+      - item.rc == 2
+      - item.stdout | trim == ''
+    fail_msg: HDD {{ item.item.role }} не доказан пустым через blkid
+  loop: "{{ physical_preparation_blkid.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Отказать при существующем ZFS-пуле с заявленным именем
+  ansible.builtin.command:
+    argv: [zpool, list, -H, -o, name, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_pool
+  failed_when: false
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Не допускать конфликта имён ZFS-пулов
+  ansible.builtin.assert:
+    that:
+      - item.rc == 1
+      - item.stdout | trim == ''
+    fail_msg: Пул {{ item.item.pool }} уже существует либо его состояние неоднозначно
+  loop: "{{ physical_preparation_pool.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Подтвердить, что проверка была исключительно читающей
+  ansible.builtin.debug:
+    msg: >-
+      Все физические диски и скрытые сигнатуры проверены,
+      но подготовка не запущена: этот Ansible-этап
+      не размечает и не форматирует HDD.
+) | list }}
+  register: physical_preparation_link_targets
+  changed_when: false
+  failed_when: false
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Сверить все найденные ссылки HDD с проверенным диском
+  ansible.builtin.assert:
+    that:
+      - resolved | length > 0
+      - resolved | rejectattr('rc', 'equalto', 0) | list | length == 0
+      - resolved | rejectattr('stdout', 'equalto', disk[0].path) | list | length == 0
+    fail_msg: Ссылка by-id указывает на чужой диск, запись запрещена
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    resolved: >-
+      {{ physical_preparation_link_targets.results
+         | selectattr('item.path', 'search', item.serial)
+         | list }}
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сохранить проверенные постоянные пути в факты текущего Ansible-запуска
+  ansible.builtin.set_fact:
+    physical_preparation_by_id: >-
+      {{ (physical_preparation_by_id | default({}))
+         | combine({item.role: (resolved | first).item.path}) }}
+  vars:
+    resolved: >-
+      {{ physical_preparation_link_targets.results
+         | selectattr('item.path', 'search', item.serial)
+         | list }}
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
 - name: Запретить использование диска с корневой файловой системой
   ansible.builtin.command:
     argv:
