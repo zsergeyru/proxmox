@@ -2,7 +2,7 @@
 services:
   qbittorrent:
     image: "{{ nas_qbit_image }}"
-    container_name: nas-qbittorrent
+    container_name: "{{ nas_provision.services.qbittorrent.container }}"
     environment:
       PUID: "{{ nas_qbit_uid.stdout }}"
       PGID: "{{ nas_qbit_gid.stdout }}"
