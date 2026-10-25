@@ -97,12 +97,7 @@
 
 - name: Проверить недостающие пакеты ZFS и Docker
   ansible.builtin.command:
-    argv:
-      - dpkg-query
-      - -W
-      - '-f=${binary:Package} ${Status}\n'
-      - "{{ nas_provision.system.packages.omv_plugins | join(' ') }}"
-      - "{{ nas_provision.system.packages.containers | join(' ') }}"
+    argv: "{{ ['dpkg-query', '-W', '-f=${binary:Package} ${Status}\\n'] + nas_provision.system.packages.omv_plugins + nas_provision.system.packages.containers }}"
   register: nas_required_packages
   changed_when: false
   failed_when: false
