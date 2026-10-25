@@ -60,6 +60,9 @@ def test_provision_and_fail_closed_phases() -> None:
                 yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8",
             )
             refuses(lambda: load_nas_provision(Path(td)))
+        check_modified(lambda d: d["system"]["packages"]["containers"].append("curl"))
+        check_modified(lambda d: d["system"]["packages"]["diagnostics"].append("aptitude"))
+        check_modified(lambda d: d["system"]["units"].update(container_runtime="docker.socket"))
         check_modified(lambda d: d["deployment"]["components"].append("evil"))
         check_modified(lambda d: d["deployment"].update(phases=["services", "base"]))
         check_modified(lambda d: d["services"]["urbackup"].update(url="http://0.0.0.0:55414/"))
@@ -146,6 +149,12 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     compose = (prefix / "roles/nas/templates/nas-qbittorrent.compose.yml.j2").read_text()
     for key in ("timezone", "web_port", "torrent_port", "downloads_directory"):
         assert "nas_provision.services.qbittorrent.runtime." + key in compose
+    base = (prefix / "roles/nas/tasks/base.yml").read_text(encoding="utf-8")
+    for package_set in ("diagnostics", "omv_dependencies", "omv_plugins", "containers"):
+        assert "nas_provision.system.packages." + package_set in base
+    for unit in ("smart_monitor", "container_runtime"):
+        assert "nas_provision.system.units." + unit in base
+    assert "update_cache: false" in base
     paths = [
         "base.yml", "urbackup_server.yml", "urbackup_client.yml", "apps.yml", "smb.yml",
     ]
