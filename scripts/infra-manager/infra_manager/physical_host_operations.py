@@ -98,5 +98,20 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         console.result("SSH-ключ обновлён после подтверждения" if changed else
                        "SSH-ключ физического сервера подтверждён")
         return 0
+    if operation == "inspect":
+        # Generic, read-only inventory through Ansible. The controller must
+        # not interpret vendor-specific disks, shares or services.
+        pve_node = os.environ.get("INFRA_PVE_NODE", "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+            raise InfraManagerError("Нет доверенного PVE для временного SSH-сертификата")
+        from .physical_host_ssh import PhysicalHostSshSession
+        from .physical_host_ansible import run_physical_ansible
+        with PhysicalHostSshSession(host, pve_node) as session:
+            run_physical_ansible(
+                repo_root, session,
+                operation="inspect",
+                variables={"physical_host_name": host.name},
+            )
+        return 0
     from .physical_host_drivers import run_host_driver
     return run_host_driver(repo_root, operation, host)
