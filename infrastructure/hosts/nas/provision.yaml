@@ -8,6 +8,15 @@ system:
   version: "13"
   application: openmediavault
   application_version: "8"
+  # Install only missing packages. No upgrades, removals or distribution changes.
+  packages:
+    diagnostics: [smartmontools, acl, gdisk, e2fsprogs, util-linux, udev, jq, ca-certificates, curl, python3]
+    omv_dependencies: [python3-debian, xz-utils, gnupg]
+    omv_plugins: [openmediavault-zfs, openmediavault-compose]
+    containers: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+  units:
+    smart_monitor: smartmontools.service
+    container_runtime: docker.service
 deployment:
   phases: [base, services]
   # Keep dependency order: server network -> LAN client -> downloads -> SMB.
