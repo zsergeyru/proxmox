@@ -37,6 +37,10 @@ def refuses(action) -> None:
 def test_provision_and_fail_closed_phases() -> None:
     p = load_nas_provision(ROOT)
     assert p["deployment"]["phases"] == ["base", "services"]
+    assert p["system"]["packages"]["diagnostics"][0] == "smartmontools"
+    assert p["system"]["services"]["containers"] == "docker.service"
+    assert p["services"]["qbittorrent"]["url"] == "http://{address}:{web_port}/"
+    assert p["services"]["qbittorrent"]["container"] == "nas-qbittorrent"
     assert p["deployment"]["components"] == [
         "urbackup_server", "urbackup_client", "apps", "smb",
     ]
@@ -61,6 +65,12 @@ def test_provision_and_fail_closed_phases() -> None:
             )
             refuses(lambda: load_nas_provision(Path(td)))
         check_modified(lambda d: d["deployment"]["components"].append("evil"))
+        check_modified(lambda d: d["system"]["packages"]["diagnostics"].append("openssh-server"))
+        check_modified(lambda d: d["system"]["packages"]["docker"].pop())
+        check_modified(lambda d: d["system"]["services"].update(containers="ssh.service"))
+        check_modified(lambda d: d["services"]["qbittorrent"].update(
+            container="docker-root"
+        ))
         check_modified(lambda d: d["deployment"].update(phases=["services", "base"]))
         check_modified(lambda d: d["services"]["urbackup"].update(url="http://0.0.0.0:55414/"))
         check_modified(lambda d: d["services"]["qbittorrent"].update(image="untrusted:latest"))
@@ -143,6 +153,11 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     assert "subelements('value')" in str(main), "Declared dependencies must be enforced"
     app_tasks = (prefix / "roles/nas/tasks/apps.yml").read_text()
     assert "nas_provision.services.qbittorrent.runtime.directories" in app_tasks
+    base_tasks = (prefix / "roles/nas/tasks/base.yml").read_text()
+    for name in ("diagnostics", "omv_prerequisites", "omv_extensions", "docker"):
+        assert "nas_provision.system.packages." + name in base_tasks
+    assert "nas_provision.system.services.containers" in base_tasks
+    assert "{{ nas_provision.services.qbittorrent.container }}" in compose
     compose = (prefix / "roles/nas/templates/nas-qbittorrent.compose.yml.j2").read_text()
     for key in ("timezone", "web_port", "torrent_port", "downloads_directory"):
         assert "nas_provision.services.qbittorrent.runtime." + key in compose
@@ -172,7 +187,13 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
 def test_shared_status_parser_and_secret_control() -> None:
     p = ROOT / "infrastructure/hosts/nas/status.yaml"
     checks = load_nas_status(ROOT, "nas", load_nas_provision(ROOT))
-    assert checks == load_declared_checks(p, identity_field="host", identity_value="nas")
+    declared = load_declared_checks(p, identity_field="host", identity_value="nas")
+    assert len(checks) == len(declared)
+    assert any(x.get("unit_from") == "system.services.containers" for x in declared)
+    assert any(x.get("unit") == "docker.service" for x in checks)
+    assert any(x.get("port_from") == "services.qbittorrent.runtime.web_port" for x in declared)
+    assert any(x.get("port") == 8080 for x in checks)
+    assert any(x.get("container") == "nas-qbittorrent" for x in checks)
     assert len(checks) >= 5
     assert _load_nas_status_document(ROOT, "nas")["health"]["disk_usage_warning_percent"] == 95
     assert any(item.get("container") == "nas-urbackup-client" for item in checks)
