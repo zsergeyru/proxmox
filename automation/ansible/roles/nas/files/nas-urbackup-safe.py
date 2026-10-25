@@ -38,13 +38,18 @@ def read_config() -> dict:
     except (OSError, ValueError) as exc:
         raise SafetyError("Отсутствует проверенное описание UrBackup NAS") from exc
     if set(raw) != {"source_pool", "source_guid", "source_mount",
-                    "backup_pool", "backup_guid", "backup_mount"}:
+                    "backup_pool", "backup_guid", "backup_mount",
+                    "backup_subdir", "client_container", "client_name"}:
         raise SafetyError("Неверное описание хранилищ UrBackup")
     if (any(not isinstance(raw[role], str) or
             not re.fullmatch(r"nas-[a-z0-9-]+", raw[role])
             for role in ("source_pool", "backup_pool"))
             or raw["source_pool"] == raw["backup_pool"]):
         raise SafetyError("Подмена или совпадение двух ZFS-пулов NAS")
+    if (raw["backup_subdir"] != "urbackup/backups"
+            or not re.fullmatch(r"nas-[a-z0-9-]+", raw["client_container"])
+            or not re.fullmatch(r"nas-[a-z0-9-]+", raw["client_name"])):
+        raise SafetyError("Небезопасные параметры клиента или каталога UrBackup")
     if raw["source_guid"] == raw["backup_guid"]:
         raise SafetyError("Источник и резерв должны быть разными физическими пулами")
     for name in ("source_guid", "backup_guid"):
