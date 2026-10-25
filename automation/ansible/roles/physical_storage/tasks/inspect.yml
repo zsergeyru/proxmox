@@ -12,7 +12,7 @@
       - physical_storage.devices | selectattr('role', 'equalto', 'system') | list | length == 1
       - physical_storage.devices | map(attribute='id') | list | unique | length == physical_storage.devices | length
       - physical_storage.volumes | map(attribute='id') | list | unique | length == physical_storage.volumes | length
-      - physical_storage.devices | selectattr('role', 'equalto', 'system') | first | attr('id') not in physical_storage.volumes | map(attribute='device') | list
+      - (physical_storage.devices | selectattr('role', 'equalto', 'system') | first).id not in (physical_storage.volumes | map(attribute='device') | list)
     fail_msg: Небезопасная декларация физического хранилища; изменения запрещены
 
 - name: Получить фактические диски без изменений
