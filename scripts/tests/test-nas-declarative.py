@@ -157,8 +157,8 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     for name in ("diagnostics", "omv_prerequisites", "omv_extensions", "docker"):
         assert "nas_provision.system.packages." + name in base_tasks
     assert "nas_provision.system.services.containers" in base_tasks
-    assert "{{ nas_provision.services.qbittorrent.container }}" in compose
     compose = (prefix / "roles/nas/templates/nas-qbittorrent.compose.yml.j2").read_text()
+    assert "{{ nas_provision.services.qbittorrent.container }}" in compose
     for key in ("timezone", "web_port", "torrent_port", "downloads_directory"):
         assert "nas_provision.services.qbittorrent.runtime." + key in compose
     paths = [
