@@ -57,7 +57,7 @@
     that:
       - not (physical_preparation_saved.stat.exists | default(false))
       - not (physical_preparation_saved.stat.islnk | default(false))
-    fail_msg: HDD уже закреплены в состоянии контроллера: новая подготовка запрещена
+    fail_msg: 'HDD уже закреплены в состоянии контроллера: новая подготовка запрещена'
 
 - name: Не допустить повторной записи по старому журналу NAS
   ansible.builtin.stat:
