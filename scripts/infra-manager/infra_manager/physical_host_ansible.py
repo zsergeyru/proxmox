@@ -40,6 +40,9 @@ def run_physical_ansible(
         playbook_name = f"deploy-{name}.yml"
     elif operation == "inspect" and phase is None:
         playbook_name = "inspect-physical-storage.yml"
+    elif operation == "prepare-preflight" and phase is None:
+        # This playbook has no write commands and cannot create filesystems.
+        playbook_name = "prepare-physical-storage-preflight.yml"
     else:
         raise InfraManagerError("Недопустимый Ansible playbook или этап")
     playbook = repo_root / "automation" / "ansible" / "playbooks" / playbook_name
