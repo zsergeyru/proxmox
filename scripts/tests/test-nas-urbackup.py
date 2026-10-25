@@ -37,6 +37,7 @@ def module(path: str, name: str):
 guard = module("nas-urbackup-safe.py", "nas_urbackup_guard_test")
 snapshot = module("nas-urbackup-snapshot.py", "nas_urbackup_snapshot_test")
 recovery = module("nas-urbackup-recovery.py", "nas_urbackup_recovery_test")
+retention = module("nas-urbackup-policy.py", "nas_urbackup_policy_test")
 
 
 def refuses(cb, cls=Exception):
@@ -454,8 +455,75 @@ def test_mount_failure_output_has_no_arbitrary_stderr():
 
 
 
+
+def test_client_scoped_urbackup_archival_policy() -> None:
+    """Never change unrelated clients or global server retention."""
+    d = retention.desired_rules(7, 4)
+    assert d["every_c0"] == "86400" and d["for_c0"] == str(7 * 86400)
+    assert d["every_c1"] == "604800" and d["for_c1"] == str(4 * 604800)
+    assert d["backup_type_c0"] == d["backup_type_c1"] == "file"
+    refuses(lambda: retention.desired_rules(0, 4), retention.PolicyError)
+    refuses(lambda: retention.desired_rules(7, 0), retention.PolicyError)
+    refuses(lambda: retention.normalized_archive("archive=1&archive=2"), retention.PolicyError)
+
+    config = {
+        "client_name": "nas-local", "admin_user": "admin", "web_port": 55414,
+        "keep_daily": 7, "keep_weekly": 4, "max_parallel_jobs": 1,
+    }
+    with tempfile.TemporaryDirectory() as td:
+        cfg = Path(td) / "retention.json"
+        cfg.write_text(json.dumps(config), encoding="utf-8")
+        assert retention.read_config(cfg) == config
+        cfg.write_text(json.dumps({**config, "web_port": 55415}), encoding="utf-8")
+        refuses(lambda: retention.read_config(cfg), retention.PolicyError)
+
+    class Server:
+        def __init__(self, initial="", use=1, *, registered=True):
+            self.archive = initial
+            self.use = use
+            self.registered = registered
+            self.calls = []
+
+        def request(self, action, payload=None):
+            self.calls.append((action, dict(payload or {})))
+            if action == "status":
+                return {"status": [
+                    {"name": "other-machine", "id": 4},
+                    *([{"name": "nas-local", "id": 12}] if self.registered else []),
+                ]}
+            if action == "settings" and payload["sa"] == "clientsettings":
+                assert payload["t_clientid"] == "12"
+                return {"settings": {"archive": {"value": self.archive, "use": self.use}}}
+            if action == "settings" and payload["sa"] == "clientsettings_save":
+                assert payload["t_clientid"] == "12"
+                assert payload["archive.use"] == "2"
+                assert set(payload) == {"sa", "t_clientid", "archive", "archive.use"}
+                self.archive, self.use = payload["archive"], 2
+                return {"saved_ok": True}
+            raise AssertionError("Unexpected or unsafe UrBackup API call")
+
+    first = Server()
+    refuses(lambda: retention.reconcile(first, config, apply=False), retention.PolicyError)
+    assert all(call[1].get("sa") != "clientsettings_save" for call in first.calls)
+    assert retention.reconcile(first, config, apply=True) is True
+    assert retention.reconcile(first, config, apply=False) is False
+    assert retention.reconcile(first, config, apply=True) is False
+    assert retention.normalized_archive(first.archive) == d
+    assert all(call[1].get("sa") not in ("general", "general_save")
+               for call in first.calls)
+    assert all(call[1].get("t_clientid", "12") == "12" for call in first.calls)
+    conflict = Server(initial="every_c0=42", use=2)
+    refuses(lambda: retention.reconcile(conflict, config, apply=True), retention.PolicyError)
+    assert not any(call[1].get("sa") == "clientsettings_save" for call in conflict.calls)
+    refuses(lambda: retention.reconcile(Server(registered=False), config, apply=True),
+            retention.PolicyError)
+    tasks = yaml.safe_load((ROOT / "automation/ansible/roles/nas/tasks/urbackup_client.yml").read_text())
+    assert any("nas-urbackup-policy, apply" in str(task) for task in tasks)
+    assert any("nas-urbackup-policy, verify" in str(task) for task in tasks)
+
 def main() -> int:
     test_backup_policy()
+    test_client_scoped_urbackup_archival_policy()
     test_volume_contract()
     test_live_guard_is_read_only()
     test_scripts_have_no_destructive_fallback()
