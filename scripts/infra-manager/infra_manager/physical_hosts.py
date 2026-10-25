@@ -31,6 +31,40 @@ class PhysicalHost:
     volumes: dict[str, dict[str, object]] | None = None
 
 
+def _validate_physical_layout(storage: object) -> None:
+    """Fail closed on contradictory physical layout before any SSH action.
+
+    Only schema and identity relations live in 910. The desired filesystem
+    types and hardware operations are interpreted by the host's Ansible role.
+    """
+    devices = {item["id"]: item for item in storage.devices}
+    assigned = [item["role"] for item in storage.devices
+                if item["role"] != "unused"]
+    if len(assigned) != len(set(assigned)):
+        raise InfraManagerError("Одна роль назначена нескольким физическим дискам")
+    volumes = {item["id"]: item for item in storage.volumes}
+    roles = {item["role"] for item in storage.devices
+             if item["role"] not in {"system", "unused"}}
+    if set(volumes) != roles:
+        raise InfraManagerError("Назначения томов не совпадают с ролями накопителей")
+    for item in storage.devices:
+        if item["by_id"] is not None and item["serial"] is None:
+            raise InfraManagerError(
+                "Недопустимый постоянный путь для неподтверждённого HDD"
+            )
+    for name, volume in volumes.items():
+        if volume["device"] != name or name not in devices:
+            raise InfraManagerError("Роль тома не соответствует физическому диску")
+        if devices[name]["role"] != name:
+            raise InfraManagerError("Том ссылается на диск другой роли")
+        if volume["kind"] not in {"ext4", "zfs_pool"}:
+            raise InfraManagerError("Неподдерживаемая прямая файловая система")
+    for item in storage.mounts:
+        if item["volume"] not in volumes:
+            raise InfraManagerError("Точка подключения неизвестного тома")
+
+
+
 def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     """Прочитать host.yaml, проверить схему и не допустить обход каталога."""
 
@@ -62,9 +96,9 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     # систему и связь с ней. Не поддерживать конкурирующий источник данных.
     storage = load_physical_storage(repo_root, name)
     driver = data["management"]["driver"]
-    # Every storage-specific invariant belongs to the selected driver.
-    from .physical_host_drivers import validate_driver_storage
-    validate_driver_storage(repo_root, driver, storage)
+    # Generic storage safety is independent of any dynamically loaded driver.
+    # The Ansible role will additionally verify the actual hardware/UUIDs.
+    _validate_physical_layout(storage)
 
     # Generic conversion from verified storage.yaml into runtime disk metadata.
     devices = tuple({
