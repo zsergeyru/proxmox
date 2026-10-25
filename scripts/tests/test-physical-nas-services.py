@@ -328,7 +328,7 @@ def test_samba_service_automation() -> None:
     )
     assert "state: started" in content
     assert "enabled: true" in content
-    assert "samba-tool, testparm, --suppress-prompt" in content
+    assert "argv: [testparm, -s]" in content
     assert "Прочитать журнал отказа Samba" in content
     assert "Прервать настройку при ошибке службы Samba" in content
     assert "/etc/samba/smb.conf" not in content
