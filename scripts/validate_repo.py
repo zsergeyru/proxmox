@@ -783,9 +783,10 @@ def _validate_physical_hosts() -> None:
     from infra_manager.common import InfraManagerError
     from infra_manager.guest_catalog import guests_by_provision_section
     from infra_manager.physical_hosts import list_physical_hosts
-    from infra_manager.physical_nas_ansible import load_nas_provision
-    from infra_manager.physical_nas_status import load_nas_status
-    from infra_manager.physical_nas_users import load_nas_users
+    sys.path.insert(0, str(ROOT / 'scripts' / 'infra-manager' / 'drivers'))
+    from omv8_support.physical_nas_ansible import load_nas_provision
+    from omv8_support.physical_nas_status import load_nas_status
+    from omv8_support.physical_nas_users import load_nas_users
     from infra_manager.user_catalog import load_user_catalog
 
     try:
