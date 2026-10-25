@@ -51,7 +51,40 @@ def load_nas_status(repo_root: Path, host_name: str,
         location, identity_field="host", identity_value=host_name,
     )
     active = set(provision["deployment"]["components"]) | {"base"}
-    return tuple(c for c in checks if c["component"] in active)
+    # Only explicitly allowlisted source references are resolvable. Disabled
+    # components are skipped before their optional settings are read.
+    references = {
+        "system.services.containers": ("system", "services", "containers"),
+        "services.qbittorrent.container": ("services", "qbittorrent", "container"),
+        "services.qbittorrent.runtime.web_port": (
+            "services", "qbittorrent", "runtime", "web_port",
+        ),
+    }
+    resolved = []
+    for item in checks:
+        if item["component"] not in active:
+            continue
+        normalized = dict(item)
+        for target in ("unit", "container", "port"):
+            source = normalized.pop(target + "_from", None)
+            if source is None:
+                continue
+            if source not in references:
+                raise InfraManagerError("Недопустимая ссылка проверки NAS")
+            try:
+                value = provision
+                for key in references[source]:
+                    value = value[key]
+            except (KeyError, TypeError) as exc:
+                raise InfraManagerError("Проверка NAS ссылается на отсутствующий параметр") from exc
+            if target == "port":
+                if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:
+                    raise InfraManagerError("В status.yaml указан неверный порт приложения")
+            elif not isinstance(value, str) or not value:
+                raise InfraManagerError("В status.yaml указан неверный ресурс приложения")
+            normalized[target] = value
+        resolved.append(normalized)
+    return tuple(resolved)
 
 
 def verify_nas_services(
@@ -192,7 +225,9 @@ def show_nas_status(
         url = (
             _omv_url(session, address)
             if spec.get("address") == "auto_omv"
-            else spec["url"].replace("{address}", address)
+            else spec["url"].replace("{address}", address).replace(
+                "{web_port}", str(spec.get("runtime", {}).get("web_port", "")),
+            )
         )
         svc = {"name": spec["title"], "url": url,
                "operator": spec.get("operator", {})}
