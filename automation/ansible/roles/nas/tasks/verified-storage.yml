@@ -93,7 +93,7 @@
       - matched | length == 1
       - matched[0].size | int >= (item.capacity_gb | int) * 900000000
       - matched[0].size | int <= (item.capacity_gb | int) * 1100000000
-      - matched[0].model | trim == item.model
+      - item.model in matched[0].model | trim
     fail_msg: Физический диск {{ item.role }} не совпадает с закреплённой идентичностью
   vars:
     matched: >-
