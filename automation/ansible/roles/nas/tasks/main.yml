@@ -23,6 +23,21 @@
   ansible.builtin.include_tasks: base.yml
   when: nas_deploy_phase == 'base'
 
+- name: Обнаружить только существующие службы для отключённых компонентов
+  ansible.builtin.service_facts:
+  when: nas_deploy_phase == 'services'
+
+- name: Остановить отключённые компоненты без удаления файлов и архивов
+  ansible.builtin.systemd_service:
+    name: "{{ item.1 }}"
+    enabled: false
+    state: stopped
+  loop: "{{ nas_provision.deployment.managed_units | dict2items | subelements('value') }}"
+  when:
+    - nas_deploy_phase == 'services'
+    - item.0.key not in nas_provision.deployment.components
+    - item.1 in ansible_facts.services
+
 - name: Применить заявленные компоненты NAS после подтверждения томов
   ansible.builtin.include_tasks: "{{ item }}.yml"
   loop: "{{ nas_provision.deployment.components }}"
