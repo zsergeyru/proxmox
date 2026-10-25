@@ -313,7 +313,7 @@ def test_permanent_docker_client_contract():
         for x in status["checks"]
     )
     assert load_nas_backup_policy(ROOT)["local_client"]["container"] == "nas-urbackup-client"
-    assert any(x.get("unit") == "nas-urbackup-client.service"
+    assert any(x.get("unit_from") == "deployment.managed_units.urbackup_client.1"
                for x in status["checks"])
     physical_status = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py").read_text()
     assert "load_declared_checks(" in physical_status
