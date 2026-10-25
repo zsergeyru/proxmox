@@ -1,0 +1,227 @@
+---
+# Первый этап подготовки HDD: ТОЛЬКО ЧТЕНИЕ.
+# Нельзя вызывать с произвольными устройствами /dev/sdX. Действия (create-*)
+# здесь обозначают одобренное намерение, НЕ разрешают фактическую запись.
+- name: Требовать отдельное подтверждённое задание на подготовку
+  ansible.builtin.assert:
+    that:
+      - physical_disk_intent is defined
+      - physical_disk_intent is mapping
+      - physical_disk_intent.keys() | list | sort == ['fingerprint', 'host', 'items', 'mode', 'schema_version']
+      - physical_disk_intent.schema_version == 1
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.mode == 'first-create'
+      - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_disk_intent.items is sequence
+      - physical_disk_intent.items | length == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | list | length)
+      - physical_disk_intent.items | map(attribute='role') | list | sort == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | map(attribute='role') | list | sort)
+      - physical_disk_intent.items | map(attribute='role') | unique | list | length == physical_disk_intent.items | length
+      - physical_disk_intent.items | map(attribute='serial') | unique | list | length == physical_disk_intent.items | length
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Нет точного подтверждённого плана HDD; запись запрещена
+
+- name: Проверить типы и назначения каждой одобренной операции
+  ansible.builtin.assert:
+    that:
+      - item.keys() | list | sort == ['action', 'role', 'serial']
+      - item.role is match('^[a-z][a-z0-9_-]*$')
+      - item.serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - selected_devices | length == 1
+      - selected_volumes | length == 1
+      - selected_devices[0].role != 'system'
+      - selected_devices[0].serial is none or selected_devices[0].serial == item.serial
+      - >-
+        (item.action == 'preserve')
+        or (item.action == 'create-ext4' and selected_volumes[0].kind == 'ext4')
+        or (item.action == 'create-zfs' and selected_volumes[0].kind == 'zfs_pool')
+    fail_msg: Неподдерживаемая операция HDD или незаявленный накопитель
+  vars:
+    selected_devices: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+    selected_volumes: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Не начинать новую подготовку, если на контроллере уже сохранена идентичность
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_preparation_saved
+
+- name: Запретить повторную подготовку подтверждённых дисков
+  ansible.builtin.assert:
+    that:
+      - not (physical_preparation_saved.stat.exists | default(false))
+      - not (physical_preparation_saved.stat.islnk | default(false))
+    fail_msg: HDD уже закреплены в состоянии контроллера: новая подготовка запрещена
+
+- name: Не допустить повторной записи по старому журналу NAS
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_preparation_journal
+
+- name: Отказаться от повторного создания после прерванной операции
+  ansible.builtin.assert:
+    that:
+      - not (physical_preparation_journal.stat.exists | default(false))
+      - not (physical_preparation_journal.stat.islnk | default(false))
+    fail_msg: Обнаружен предыдущий журнал HDD; требуется отдельное восстановление БЕЗ форматирования
+
+- name: Получить полное дерево физических дисков и разделов
+  ansible.builtin.command:
+    argv: [lsblk, --json, --tree, --bytes, --output, 'NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS']
+  register: physical_preparation_tree
+  changed_when: false
+
+- name: Проверить единственный системный SSD по реальному корневому mount
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 1'
+    stdin: "{{ physical_preparation_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+
+- name: Зафиксировать обнаруженные устройства для независимых проверок
+  ansible.builtin.set_fact:
+    physical_preparation_disks: >-
+      {{ (physical_preparation_tree.stdout | from_json).blockdevices
+         | selectattr('type', 'equalto', 'disk') | list }}
+
+- name: Не принимать неизвестные диски с неподтверждённым назначением
+  ansible.builtin.assert:
+    that:
+      - physical_preparation_disks | length == physical_storage.devices | length
+      - physical_preparation_disks | map(attribute='serial') | list | unique | length == physical_preparation_disks | length
+    fail_msg: Физический состав машины изменился или содержит одинаковые serial
+
+- name: Сверить модель, объём и уникальный serial непосредственно перед операцией
+  ansible.builtin.assert:
+    that:
+      - disk | length == 1
+      - disk[0].path is match('^/dev/[a-zA-Z0-9._/-]+$')
+      - disk[0].model is string
+      - expected[0].model | lower in disk[0].model | lower
+      - disk[0].size | int >= (expected[0].capacity_gb | int) * 950000000
+      - disk[0].size | int <= (expected[0].capacity_gb | int) * 1050000000
+    fail_msg: Физическая идентичность HDD {{ item.role }} не подтверждена
+  vars:
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Запретить использование диска с корневой файловой системой
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_preparation_tree.stdout }}"
+    stdin_add_newline: false
+  loop: "{{ physical_disk_intent.items }}"
+  loop_control:
+    label: "{{ item.role }}"
+  changed_when: false
+
+- name: Проверить отсутствие разделов и файловых систем на дисках для создания
+  ansible.builtin.assert:
+    that:
+      - disk | length == 1
+      - disk[0].children is not defined or not disk[0].children
+      - disk[0].pttype | default(none) is none
+      - disk[0].fstype | default(none) is none
+      - disk[0].uuid | default(none) is none
+      - not (disk[0].mountpoints | default([], true) | reject('none') | list)
+    fail_msg: HDD {{ item.role }} уже содержит разметку, ФС или монтирование
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить отсутствие скрытых сигнатур без записи на HDD
+  ansible.builtin.command:
+    argv:
+      - wipefs
+      - --no-act
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_wipefs
+  changed_when: false
+
+- name: Убедиться, что на новых дисках нет скрытых сигнатур
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == ''
+    fail_msg: Обнаружена старая сигнатура на {{ item.item.role }}; запись запрещена
+  loop: "{{ physical_preparation_wipefs.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Независимо обследовать каждый новый диск через blkid
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -p
+      - "{{ disk[0].path }}"
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: physical_preparation_blkid
+  failed_when: false
+  changed_when: false
+
+- name: Отказать, если blkid обнаружил данные либо ошибку чтения
+  ansible.builtin.assert:
+    that:
+      - item.rc == 2
+      - item.stdout | trim == ''
+    fail_msg: HDD {{ item.item.role }} не доказан пустым через blkid
+  loop: "{{ physical_preparation_blkid.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Отказать при существующем ZFS-пуле с заявленным именем
+  ansible.builtin.command:
+    argv: [zpool, list, -H, -o, name, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_pool
+  failed_when: false
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Не допускать конфликта имён ZFS-пулов
+  ansible.builtin.assert:
+    that:
+      - item.rc == 1
+      - item.stdout | trim == ''
+    fail_msg: Пул {{ item.item.pool }} уже существует либо его состояние неоднозначно
+  loop: "{{ physical_preparation_pool.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Подтвердить, что проверка была исключительно читающей
+  ansible.builtin.debug:
+    msg: >-
+      Все физические диски и скрытые сигнатуры проверены,
+      но подготовка не запущена: этот Ansible-этап
+      не размечает и не форматирует HDD.
