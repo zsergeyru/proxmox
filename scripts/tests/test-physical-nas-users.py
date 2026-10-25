@@ -14,10 +14,11 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/drivers"))
 
 from infra_manager.common import InfraManagerError
 from infra_manager.user_catalog import load_user_catalog, validate_user_catalog
-from infra_manager.physical_nas_users import (
+from omv8_support.physical_nas_users import (
     load_nas_users, require_nas_users_configured, require_nas_smb_secret,
     validate_nas_access,
 )
