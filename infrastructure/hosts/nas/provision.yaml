@@ -35,6 +35,13 @@ deployment:
   # Dependencies are checked before any Ansible task is run.
   dependencies:
     urbackup_client: [urbackup_server]
+  # Existing units are stopped if their component is disabled. Data and
+  # installed systemd definitions are never removed by this reconciliation.
+  managed_units:
+    urbackup_server: [nas-urbackup-recovery.timer, nas-urbackup.service]
+    urbackup_client: [nas-urbackup-local.timer, nas-urbackup-client.service]
+    apps: [nas-qbittorrent.service]
+    smb: [smbd.service]
 services:
   openmediavault:
     component: base
