@@ -54,7 +54,7 @@ def test_preflight_has_no_disk_writes() -> None:
         "reject_writes",
         "serial",
         "mountpoints",
-        "root",
+        "physical_preparation_tree",
     ):
         assert term in text, term
     playbook = yaml.safe_load(
