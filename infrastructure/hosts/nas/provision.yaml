@@ -8,6 +8,26 @@ system:
   version: "13"
   application: openmediavault
   application_version: "8"
+  # Allowlisted, additive package groups. Packages no longer required by an
+  # optional component are preserved; deploy does not remove packages.
+  packages:
+    diagnostics:
+      - smartmontools
+      - acl
+      - gdisk
+      - e2fsprogs
+      - util-linux
+      - udev
+      - jq
+      - ca-certificates
+      - curl
+      - python3
+    omv_prerequisites: [python3-debian, xz-utils, gnupg]
+    omv_extensions: [openmediavault-zfs, openmediavault-compose]
+    docker: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+  services:
+    smart: smartmontools.service
+    containers: docker.service
 deployment:
   phases: [base, services]
   # Keep dependency order: server network -> LAN client -> downloads -> SMB.
