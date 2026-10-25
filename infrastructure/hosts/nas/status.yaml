@@ -12,15 +12,15 @@ checks:
     message: Docker работает
   - type: systemd
     component: smb
-    unit: smbd.service
+    unit_from: deployment.managed_units.smb.0
     message: Samba работает
   - type: systemd
     component: urbackup_server
-    unit: nas-urbackup.service
+    unit_from: deployment.managed_units.urbackup_server.1
     message: UrBackup Server запущен
   - type: systemd
     component: urbackup_client
-    unit: nas-urbackup-client.service
+    unit_from: deployment.managed_units.urbackup_client.1
     message: UrBackup Client запущен
   - type: docker
     component: urbackup_server

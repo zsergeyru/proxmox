@@ -34,7 +34,7 @@ properties:
   deployment:
     type: object
     additionalProperties: false
-    required: [phases, components, dependencies]
+    required: [phases, components, dependencies, managed_units]
     properties:
       phases:
         const: [base, services]
@@ -53,6 +53,19 @@ properties:
           apps: {$ref: '#/$defs/dependency_list'}
           smb: {$ref: '#/$defs/dependency_list'}
         required: [urbackup_client]
+      managed_units:
+        type: object
+        additionalProperties: false
+        required: [urbackup_server, urbackup_client, apps, smb]
+        properties:
+          urbackup_server:
+            const: [nas-urbackup-recovery.timer, nas-urbackup.service]
+          urbackup_client:
+            const: [nas-urbackup-local.timer, nas-urbackup-client.service]
+          apps:
+            const: [nas-qbittorrent.service]
+          smb:
+            const: [smbd.service]
   services:
     type: object
     minProperties: 1

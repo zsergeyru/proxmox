@@ -52,7 +52,12 @@
                 "pattern": "^[a-zA-Z0-9_.@-]+[.](service|timer)$"
               },
               "unit_from": {
-                "const": "system.services.containers"
+                "enum": [
+                  "system.services.containers",
+                  "deployment.managed_units.smb.0",
+                  "deployment.managed_units.urbackup_server.1",
+                  "deployment.managed_units.urbackup_client.1"
+                ]
               }
             },
             "allOf": [

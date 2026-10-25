@@ -55,6 +55,15 @@ def load_nas_status(repo_root: Path, host_name: str,
     # components are skipped before their optional settings are read.
     references = {
         "system.services.containers": ("system", "services", "containers"),
+        "deployment.managed_units.urbackup_server.1": (
+            "deployment", "managed_units", "urbackup_server", 1,
+        ),
+        "deployment.managed_units.urbackup_client.1": (
+            "deployment", "managed_units", "urbackup_client", 1,
+        ),
+        "deployment.managed_units.smb.0": (
+            "deployment", "managed_units", "smb", 0,
+        ),
         "services.qbittorrent.container": ("services", "qbittorrent", "container"),
         "services.qbittorrent.runtime.web_port": (
             "services", "qbittorrent", "runtime", "web_port",
@@ -84,7 +93,7 @@ def load_nas_status(repo_root: Path, host_name: str,
                     value = provision
                 for key in references[source]:
                     value = value[key]
-            except (KeyError, TypeError) as exc:
+            except (KeyError, IndexError, TypeError) as exc:
                 raise InfraManagerError("Проверка NAS ссылается на отсутствующий параметр") from exc
             if target == "port":
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 65535:

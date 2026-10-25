@@ -39,6 +39,8 @@ def test_provision_and_fail_closed_phases() -> None:
     assert p["deployment"]["phases"] == ["base", "services"]
     assert p["system"]["packages"]["diagnostics"][0] == "smartmontools"
     assert p["system"]["services"]["containers"] == "docker.service"
+    assert p["deployment"]["managed_units"]["smb"] == ["smbd.service"]
+    assert p["deployment"]["managed_units"]["urbackup_client"][0].endswith(".timer")
     assert p["services"]["qbittorrent"]["url"] == "http://{address}:{web_port}/"
     assert p["services"]["qbittorrent"]["container"] == "nas-qbittorrent"
     assert p["deployment"]["components"] == [
@@ -65,6 +67,12 @@ def test_provision_and_fail_closed_phases() -> None:
             )
             refuses(lambda: load_nas_provision(Path(td)))
         check_modified(lambda d: d["deployment"]["components"].append("evil"))
+        check_modified(lambda d: d["deployment"]["managed_units"]["smb"].append(
+            "ssh.service"
+        ))
+        check_modified(lambda d: d["deployment"]["managed_units"].update(
+            apps=["docker.service"]
+        ))
         check_modified(lambda d: d["system"]["packages"]["diagnostics"].append("openssh-server"))
         check_modified(lambda d: d["system"]["packages"]["docker"].pop())
         check_modified(lambda d: d["system"]["services"].update(containers="ssh.service"))
@@ -151,6 +159,15 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     ), "Component composition must not be hardcoded"
     assert any("difference(" in item for item in assertions)
     assert "subelements('value')" in str(main), "Declared dependencies must be enforced"
+    stop = next(task for task in main if task.get("name", "").startswith(
+        "Остановить отключённые компоненты"
+    ))
+    assert stop["ansible.builtin.systemd_service"] == {
+        "name": "{{ item.1 }}", "enabled": False, "state": "stopped",
+    }
+    assert "item.0.key not in nas_provision.deployment.components" in stop["when"]
+    assert "item.1 in ansible_facts.services" in stop["when"]
+    assert "nas_provision.deployment.managed_units" in stop["loop"]
     app_tasks = (prefix / "roles/nas/tasks/apps.yml").read_text()
     assert "nas_provision.services.qbittorrent.runtime.directories" in app_tasks
     base_tasks = (prefix / "roles/nas/tasks/base.yml").read_text()
@@ -191,6 +208,8 @@ def test_shared_status_parser_and_secret_control() -> None:
     assert len(checks) == len(declared)
     assert any(x.get("unit_from") == "system.services.containers" for x in declared)
     assert any(x.get("unit") == "docker.service" for x in checks)
+    for expected in ("smbd.service", "nas-urbackup.service", "nas-urbackup-client.service"):
+        assert any(x.get("unit") == expected for x in checks)
     assert any(x.get("port_from") == "services.qbittorrent.runtime.web_port" for x in declared)
     assert any(x.get("port") == 8080 for x in checks)
     assert any(x.get("container") == "nas-qbittorrent" for x in checks)
