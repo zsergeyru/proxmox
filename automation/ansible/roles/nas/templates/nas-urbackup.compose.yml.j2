@@ -2,7 +2,7 @@
 services:
   urbackup:
     image: "{{ nas_urbackup_image }}"
-    container_name: nas-urbackup
+    container_name: "{{ nas_backup_policy.server.name }}"
     environment:
       PUID: "{{ nas_urbackup_uid.stdout }}"
       PGID: "{{ nas_urbackup_gid.stdout }}"
