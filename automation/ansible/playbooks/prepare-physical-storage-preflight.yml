@@ -1,0 +1,17 @@
+---
+# Only guarded, read-only preparation eligibility. The actual create/recovery
+# operations are deliberately outside this playbook until explicitly migrated.
+- name: Проверить готовность HDD к первому созданию без изменений
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    physical_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/' ~ physical_host_name ~ '/storage.yaml')
+         | from_yaml }}
+  tasks:
+    - name: Проверить подтверждённый план HDD, идентичность и отсутствие данных
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: prepare-preflight.yml
