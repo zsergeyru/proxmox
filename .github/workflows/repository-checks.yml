@@ -104,6 +104,9 @@ jobs:
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
 
+      - name: Check Ansible-only OMV shared folders
+        run: python scripts/tests/test-nas-omv-ansible.py
+
       - name: Check NAS SMB and ZFS safety
         run: python scripts/tests/test-physical-nas-services.py
 

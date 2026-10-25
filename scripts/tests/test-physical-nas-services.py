@@ -323,7 +323,7 @@ def test_samba_service_automation() -> None:
 
     file = ROOT / "automation/ansible/roles/nas/tasks/smb.yml"
     content = file.read_text(encoding="utf-8")
-    assert content.index("Зарегистрировать папки и ресурсы через базу OMV") < (
+    assert content.index("Согласовать объекты OMV штатными средствами Ansible") < (
         content.index("Включить автозапуск и запустить Samba")
     )
     assert "state: started" in content
@@ -340,7 +340,7 @@ def test_samba_service_automation() -> None:
     assert "nas_access_policy.mode == 'named_users'" in content
     assert "g:nas-smb:rwx,m::rwx,d:g:nas-smb:rwx,d:m::rwx" in content
     assert content.index("Назначить группе Samba полные права") < (
-        content.index("Зарегистрировать папки и ресурсы через базу OMV")
+        content.index("Согласовать объекты OMV штатными средствами Ansible")
     )
 
 
