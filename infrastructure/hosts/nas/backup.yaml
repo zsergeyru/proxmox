@@ -16,6 +16,7 @@ local_client:
   enabled: true
   image: uroni/urbackup-client:2.5.31
   name: nas-local
+  container: nas-urbackup-client
   source_volume: data
   target_volume: backup
   schedule: "03:30"
