@@ -517,8 +517,12 @@ def test_client_scoped_urbackup_archival_policy() -> None:
     refuses(lambda: retention.reconcile(Server(registered=False), config, apply=True),
             retention.PolicyError)
     tasks = yaml.safe_load((ROOT / "automation/ansible/roles/nas/tasks/urbackup_client.yml").read_text())
-    assert any("nas-urbackup-policy, apply" in str(task) for task in tasks)
-    assert any("nas-urbackup-policy, verify" in str(task) for task in tasks)
+    assert any(task.get("ansible.builtin.command", {}).get("argv") ==
+               ["/usr/local/sbin/nas-urbackup-policy", "apply"]
+               for task in tasks)
+    assert any(task.get("ansible.builtin.command", {}).get("argv") ==
+               ["/usr/local/sbin/nas-urbackup-policy", "verify"]
+               for task in tasks)
 
 def main() -> int:
     test_backup_policy()
