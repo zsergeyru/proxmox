@@ -10,7 +10,6 @@ from pathlib import Path
 from infra_manager.common import InfraManagerError, console, run
 from infra_manager.physical_hosts import PhysicalHost
 from infra_manager.physical_host_ssh import PhysicalHostSshSession
-from infra_manager.physical_host_bootstrap import bootstrap_physical_host
 from infra_manager.physical_storage import read_disk_inspection, verify_expected_disks
 from infra_manager.physical_storage_plan import propose_storage, format_storage_plan, observed_disk_condition
 from infra_manager.physical_nas_storage_state import apply_saved_storage
@@ -62,22 +61,11 @@ def execute(repo_root: Path, operation: str, host: PhysicalHost) -> int:
             f"{host.directory / 'host.yaml'}: укажите сетевой адрес физического сервера; "
             "автоматический поиск соседних машин запрещён"
         )
-    if host.ssh_host_fingerprint is None and operation != "bootstrap":
+    if host.ssh_host_fingerprint is None:
         raise InfraManagerError(
             f"Первое SSH-доверие {host.name} ещё не установлено. "
             f"Запустите интерактивно infra-manager deploy {host.name} на PVE"
         )
-
-    if operation == "bootstrap":
-        pve_node = os.environ.get("INFRA_PVE_NODE", "")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
-            raise InfraManagerError("Не определён доверенный узел PVE")
-        payload = sys.stdin.readline(16385)
-        if not payload or len(payload) > 16384 or not payload.endswith("\n"):
-            raise InfraManagerError("Некорректный закрытый ввод для первого подключения")
-        bootstrap_physical_host(host, pve_node, payload)
-        console.result("Начальное доверие NAS установлено, вход OpenBao подтверждён")
-        return 0
 
     if operation == "storage-prepare":
         pve_node = os.environ.get("INFRA_PVE_NODE", "")
