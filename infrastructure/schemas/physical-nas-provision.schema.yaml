@@ -9,12 +9,32 @@ properties:
   system:
     type: object
     additionalProperties: false
-    required: [distribution, version, application, application_version]
+    required: [distribution, version, application, application_version, packages, units]
     properties:
       distribution: {const: debian}
       version: {const: "13"}
       application: {const: openmediavault}
       application_version: {const: "8"}
+      packages:
+        type: object
+        additionalProperties: false
+        required: [diagnostics, omv_dependencies, omv_plugins, containers]
+        properties:
+          diagnostics:
+            $ref: '#/$defs/diagnostic_packages'
+          omv_dependencies:
+            $ref: '#/$defs/omv_dependencies'
+          omv_plugins:
+            $ref: '#/$defs/omv_plugins'
+          containers:
+            $ref: '#/$defs/container_packages'
+      units:
+        type: object
+        additionalProperties: false
+        required: [smart_monitor, container_runtime]
+        properties:
+          smart_monitor: {const: smartmontools.service}
+          container_runtime: {const: docker.service}
   deployment:
     type: object
     additionalProperties: false
@@ -82,6 +102,36 @@ properties:
         volume: {enum: [shared, data]}
         directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
 $defs:
+  # Explicit allowed package names prevent YAML from installing arbitrary tools.
+  diagnostic_packages:
+    type: array
+    minItems: 9
+    maxItems: 16
+    uniqueItems: true
+    items:
+      enum: [smartmontools, acl, gdisk, e2fsprogs, util-linux, udev, jq, ca-certificates, curl, python3]
+    allOf:
+      - contains: {const: smartmontools}
+      - contains: {const: acl}
+      - contains: {const: util-linux}
+  omv_dependencies:
+    type: array
+    minItems: 3
+    maxItems: 3
+    uniqueItems: true
+    items: {enum: [python3-debian, xz-utils, gnupg]}
+  omv_plugins:
+    type: array
+    minItems: 2
+    maxItems: 2
+    uniqueItems: true
+    items: {enum: [openmediavault-zfs, openmediavault-compose]}
+  container_packages:
+    type: array
+    minItems: 4
+    maxItems: 4
+    uniqueItems: true
+    items: {enum: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]}
   qbittorrent_runtime:
     type: object
     additionalProperties: false
