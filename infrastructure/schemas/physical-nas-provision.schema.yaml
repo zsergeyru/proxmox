@@ -9,12 +9,28 @@ properties:
   system:
     type: object
     additionalProperties: false
-    required: [distribution, version, application, application_version]
+    required: [distribution, version, application, application_version, packages, services]
     properties:
       distribution: {const: debian}
       version: {const: "13"}
       application: {const: openmediavault}
       application_version: {const: "8"}
+      packages:
+        type: object
+        additionalProperties: false
+        required: [diagnostics, omv_prerequisites, omv_extensions, docker]
+        properties:
+          diagnostics: {$ref: '#/$defs/nas_diagnostics'}
+          omv_prerequisites: {$ref: '#/$defs/nas_prerequisites'}
+          omv_extensions: {$ref: '#/$defs/nas_extensions'}
+          docker: {$ref: '#/$defs/nas_docker_packages'}
+      services:
+        type: object
+        additionalProperties: false
+        required: [smart, containers]
+        properties:
+          smart: {const: smartmontools.service}
+          containers: {const: docker.service}
   deployment:
     type: object
     additionalProperties: false
@@ -82,6 +98,30 @@ properties:
         volume: {enum: [shared, data]}
         directory: {type: string, pattern: '^[a-z][a-z0-9-]{0,30}$'}
 $defs:
+  nas_diagnostics:
+    type: array
+    minItems: 10
+    maxItems: 10
+    uniqueItems: true
+    items: {enum: [smartmontools, acl, gdisk, e2fsprogs, util-linux, udev, jq, ca-certificates, curl, python3]}
+  nas_prerequisites:
+    type: array
+    minItems: 3
+    maxItems: 3
+    uniqueItems: true
+    items: {enum: [python3-debian, xz-utils, gnupg]}
+  nas_extensions:
+    type: array
+    minItems: 2
+    maxItems: 2
+    uniqueItems: true
+    items: {enum: [openmediavault-zfs, openmediavault-compose]}
+  nas_docker_packages:
+    type: array
+    minItems: 4
+    maxItems: 4
+    uniqueItems: true
+    items: {enum: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]}
   qbittorrent_runtime:
     type: object
     additionalProperties: false
