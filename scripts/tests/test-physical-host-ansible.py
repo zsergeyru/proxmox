@@ -98,8 +98,20 @@ def test_native_disk_read_only_contract() -> None:
         "name": "physical_storage", "tasks_from": "inspect.yml",
     }
     assert preflight[1]["ansible.builtin.include_role"] == {
+        "name": "physical_storage", "tasks_from": "verified.yml",
+    }
+    assert preflight[2]["ansible.builtin.include_role"] == {
         "name": "nas", "tasks_from": "verified-storage.yml",
     }
+    verified = yaml.safe_load(
+        (directory / "roles/physical_storage/tasks/verified.yml").read_text()
+    )
+    assert "physical_confirmed_state" in str(verified)
+    assert "delegate_to" in str(verified)
+    assert "pool_guid" in str(verified)
+    assert "filesystem_uuid" in str(verified)
+    assert all("changed_when" in item and item["changed_when"] is False
+               for item in verified if "ansible.builtin.command" in item)
     generic = yaml.safe_load(
         (directory / "playbooks/inspect-physical-storage.yml").read_text()
     )
