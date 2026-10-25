@@ -6,7 +6,7 @@ name: nas-urbackup-client
 services:
   client:
     image: "{{ nas_urbackup_client_image }}"
-    container_name: nas-urbackup-client
+    container_name: "{{ nas_backup_policy.local_client.container }}"
     hostname: "{{ nas_urbackup_client_name }}"
     entrypoint: ["/usr/local/sbin/urbackupclientbackend"]
     command: ["--config", "/etc/default/urbackupclient"]
