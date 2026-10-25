@@ -103,7 +103,11 @@
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]+$"
               },
               "container_from": {
-                "const": "services.qbittorrent.container"
+                "enum": [
+                  "services.qbittorrent.container",
+                  "backup.server.name",
+                  "backup.local_client.container"
+                ]
               }
             },
             "allOf": [

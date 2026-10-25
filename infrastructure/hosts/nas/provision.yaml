@@ -62,8 +62,8 @@ services:
     component: urbackup_server
     title: UrBackup Server
     # Admin port is intentionally bound to NAS loopback only.
-    url: "http://127.0.0.1:55414/"
-    access: "SSH-туннель к NAS (локальный порт 55414)"
+    url: "http://{web_bind}:{web_port}/"
+    access: "SSH-туннель к NAS (локальный порт {web_port})"
     operator:
       username: admin
       password:

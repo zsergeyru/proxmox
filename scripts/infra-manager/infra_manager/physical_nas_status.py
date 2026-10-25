@@ -59,8 +59,11 @@ def load_nas_status(repo_root: Path, host_name: str,
         "services.qbittorrent.runtime.web_port": (
             "services", "qbittorrent", "runtime", "web_port",
         ),
+        "backup.server.name": ("server", "name"),
+        "backup.local_client.container": ("local_client", "container"),
     }
     resolved = []
+    backup_policy = None
     for item in checks:
         if item["component"] not in active:
             continue
@@ -72,7 +75,13 @@ def load_nas_status(repo_root: Path, host_name: str,
             if source not in references:
                 raise InfraManagerError("Недопустимая ссылка проверки NAS")
             try:
-                value = provision
+                if source.startswith("backup."):
+                    if backup_policy is None:
+                        from .physical_nas_backup_policy import load_nas_backup_policy
+                        backup_policy = load_nas_backup_policy(repo_root)
+                    value = backup_policy
+                else:
+                    value = provision
                 for key in references[source]:
                     value = value[key]
             except (KeyError, TypeError) as exc:
@@ -219,6 +228,7 @@ def show_nas_status(
     print(f"  {'Ветка:':<12}{project_branch_for_checkout(repo_root)}")
     print(f"  {'Версия:':<12}{project_revision or current_project_revision(repo_root)}")
     enabled = set(provision["deployment"]["components"]) | {"base"}
+    backup_server = None
     for name, spec in services.items():
         if spec["component"] not in enabled:
             continue
@@ -226,9 +236,16 @@ def show_nas_status(
             _omv_url(session, address)
             if spec.get("address") == "auto_omv"
             else spec["url"].replace("{address}", address).replace(
-                "{web_port}", str(spec.get("runtime", {}).get("web_port", "")),
-            )
+                "{web_port}", str(spec["runtime"]["web_port"]),
+            ) if "runtime" in spec else spec["url"].replace("{address}", address)
         )
+        if "{web_bind}" in url or "{web_port}" in url:
+            if backup_server is None:
+                from .physical_nas_backup_policy import load_nas_backup_policy
+                backup_server = load_nas_backup_policy(repo_root)["server"]
+            url = url.replace("{web_bind}", backup_server["web_bind"]).replace(
+                "{web_port}", str(backup_server["web_port"]),
+            )
         svc = {"name": spec["title"], "url": url,
                "operator": spec.get("operator", {})}
         fields = _service_fields(
@@ -236,7 +253,12 @@ def show_nas_status(
             password_resolver=lambda credential: _host_password(session, credential),
         )
         if "access" in spec:
-            fields.append(("Доступ", spec["access"]))
+            description = spec["access"]
+            if backup_server is not None:
+                description = description.replace(
+                    "{web_port}", str(backup_server["web_port"]),
+                )
+            fields.append(("Доступ", description))
         if "password" not in spec.get("operator", {}):
             fields.append(("Пароль", "не хранится в конфигурации проекта"))
         width = max(len(k) for k, _ in fields) + 3

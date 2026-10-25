@@ -23,11 +23,12 @@ properties:
   local_client:
     type: object
     additionalProperties: false
-    required: [enabled, image, name, source_volume, target_volume, schedule, exclude_volumes]
+    required: [enabled, image, name, container, source_volume, target_volume, schedule, exclude_volumes]
     properties:
       enabled: {const: true}
       image: {const: 'uroni/urbackup-client:2.5.31'}
       name: {const: nas-local}
+      container: {const: nas-urbackup-client}
       source_volume: {const: data}
       target_volume: {const: backup}
       schedule: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'}
