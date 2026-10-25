@@ -1,0 +1,152 @@
+---
+# Read-only safety gate for a physical host already provisioned and registered.
+# It must run before *any* Ansible task that writes to storage or service paths.
+# Unlike a Python host driver, this gate is standard Ansible only.
+- name: Проверить объявленное имя физического сервера
+  ansible.builtin.assert:
+    that:
+      - physical_host_name is match('^[a-z][a-z0-9-]*$')
+      - physical_host_name == nas_storage.host
+      - physical_host_name == nas_provision.host
+      - physical_host_name == nas_backup_policy.host
+      - nas_storage.policies.existing_data == 'preserve'
+      - nas_storage.policies.unverified_devices == 'reject_writes'
+      - nas_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Противоречивые декларации NAS; изменения запрещены
+
+- name: Проверить файл неизменяемых назначений накопителей на контроллере
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+    get_checksum: false
+  delegate_to: localhost
+  become: false
+  register: nas_storage_state_file
+
+- name: Остановить применение без подтверждённой идентичности HDD
+  ansible.builtin.assert:
+    that:
+      - nas_storage_state_file.stat.exists | default(false)
+      - nas_storage_state_file.stat.isreg | default(false)
+      - not (nas_storage_state_file.stat.islnk | default(false))
+      - nas_storage_state_file.stat.mode == '0600'
+    fail_msg: Нет защищённого состояния HDD в 910; никаких изменений не разрешено
+
+- name: Прочитать подтверждённую ранее идентичность томов
+  ansible.builtin.set_fact:
+    nas_confirmed_state: >-
+      {{ lookup('ansible.builtin.file',
+          '/var/lib/infra-manager/physical-hosts/' ~ physical_host_name ~ '-storage.json')
+          | from_json }}
+
+- name: Подтвердить неизменность роли, адреса и числа дисков
+  ansible.builtin.assert:
+    that:
+      - nas_confirmed_state.name == physical_host_name
+      - nas_confirmed_state.address == ansible_host
+      - nas_confirmed_state.devices | length == nas_storage.devices | length
+      - nas_confirmed_state.volumes.keys() | list | sort == nas_storage.volumes | map(attribute='id') | list | sort
+    fail_msg: Идентичность накопителей на контроллере не соответствует YAML
+
+- name: Сравнить закреплённые роли, модели и серийные номера
+  ansible.builtin.assert:
+    that:
+      - matched | length == 1
+      - matched[0].model == item.model
+      - matched[0].capacity_gb | int == item.capacity_gb | int
+      - matched[0].serial is string
+      - matched[0].serial | length > 0
+      - item.serial is none or matched[0].serial == item.serial
+    fail_msg: Назначение физического диска {{ item.role }} изменилось
+  vars:
+    matched: "{{ nas_confirmed_state.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ nas_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сверить подтверждённые UUID и GUID с декларацией
+  ansible.builtin.assert:
+    that:
+      - confirmed is mapping
+      - item.filesystem_uuid is not defined or item.filesystem_uuid is none or confirmed.filesystem_uuid == item.filesystem_uuid
+      - item.pool_guid is not defined or item.pool_guid is none or confirmed.pool_guid | string == item.pool_guid | string
+      - item.pool is not defined or confirmed.pool == item.pool
+      - item.omv_reference is none or confirmed.omv_reference == item.omv_reference
+      - confirmed.mountpoint is string
+      - confirmed.mountpoint is match('^/[a-zA-Z0-9_./-]+$')
+    fail_msg: UUID/GUID тома {{ item.id }} не соответствует подтверждённому состоянию
+  vars:
+    confirmed: "{{ nas_confirmed_state.volumes[item.id] | default({}) }}"
+  loop: "{{ nas_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Получить доступные физические диски без изменений
+  ansible.builtin.command:
+    argv: [lsblk, --json, --bytes, --output, "NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS"]
+  register: nas_lsblk_actual
+  changed_when: false
+
+- name: Сверить реальные серийные номера физических HDD
+  ansible.builtin.assert:
+    that:
+      - matched | length == 1
+      - matched[0].size | int >= (item.capacity_gb | int) * 900000000
+      - matched[0].size | int <= (item.capacity_gb | int) * 1100000000
+      - item.model in matched[0].model | trim
+    fail_msg: Физический диск {{ item.role }} не совпадает с закреплённой идентичностью
+  vars:
+    matched: >-
+      {{ (nas_lsblk_actual.stdout | from_json).blockdevices |
+         selectattr('type', 'equalto', 'disk') |
+         selectattr('serial', 'equalto',
+           (nas_confirmed_state.devices | selectattr('role', 'equalto', item.role) | first).serial) |
+         list }}
+  loop: "{{ nas_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить реальные ext4/ZFS точки подключения
+  ansible.builtin.command:
+    argv: [findmnt, --mountpoint, "{{ nas_confirmed_state.volumes[item.id].mountpoint }}", --noheadings, --output, FSTYPE]
+  loop: "{{ nas_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+  register: nas_real_mounts
+  changed_when: false
+
+- name: Сверить типы файловых систем
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == ('ext4' if nas_storage.volumes[index].kind == 'ext4' else 'zfs')
+    fail_msg: Точка подключения {{ item.item.id }} содержит неожиданную файловую систему
+  loop: "{{ nas_real_mounts.results }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.item.id }}"
+
+- name: Проверить UUID общего ext4 по реальному mount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "{{ nas_confirmed_state.volumes.shared.mountpoint }}"
+      - --source
+      - "UUID={{ nas_confirmed_state.volumes.shared.filesystem_uuid }}"
+  changed_when: false
+
+- name: Прочитать GUID существующих ZFS пулов
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ nas_confirmed_state.volumes[item].pool }}"]
+  loop: [data, backup]
+  register: nas_pool_guids
+  changed_when: false
+
+- name: Подтвердить GUID всех ZFS пулов перед записью
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == nas_confirmed_state.volumes[item.item].pool_guid | string
+    fail_msg: Обнаружен ZFS пул с чужим GUID; деплой остановлен
+  loop: "{{ nas_pool_guids.results }}"
+  loop_control:
+    label: "{{ item.item }}"

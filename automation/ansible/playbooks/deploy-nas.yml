@@ -1,9 +1,21 @@
 ---
-# Single Ansible entrypoint. Python verifies the physical NAS and passes
-# validated runtime identities; all service configuration lives in the role.
+# Standard Ansible-only safety preflight, in addition to existing protections.
+# No Python driver is used by the preflight tasks.
 - name: Применить декларативную конфигурацию физического NAS
   hosts: nas
   gather_facts: "{{ nas_deploy_phase == 'base' }}"
   become: false
+  vars:
+    physical_host_name: nas
+    nas_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
+         | from_yaml }}
+  pre_tasks:
+    - name: Повторить независимую Ansible-проверку накопителей до служб
+      ansible.builtin.include_role:
+        name: nas
+        tasks_from: verified-storage.yml
+      when: nas_deploy_phase == 'services'
   roles:
     - role: nas
