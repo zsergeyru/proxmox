@@ -60,8 +60,7 @@
             "required": [
               "type",
               "message",
-              "component",
-              "container"
+              "component"
             ],
             "properties": {
               "type": {
@@ -84,8 +83,28 @@
               "container": {
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]+$"
+              },
+              "container_ref": {
+                "type": "string",
+                "enum": [
+                  "backup.server.name",
+                  "backup.local_client.container_name",
+                  "provision.services.qbittorrent.container_name"
+                ]
               }
-            }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "container"
+                ]
+              },
+              {
+                "required": [
+                  "container_ref"
+                ]
+              }
+            ]
           },
           {
             "type": "object",
@@ -93,8 +112,7 @@
             "required": [
               "type",
               "message",
-              "component",
-              "port"
+              "component"
             ],
             "properties": {
               "type": {
@@ -118,8 +136,26 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 65535
+              },
+              "port_ref": {
+                "type": "string",
+                "enum": [
+                  "provision.services.qbittorrent.runtime.web_port"
+                ]
               }
-            }
+            },
+            "oneOf": [
+              {
+                "required": [
+                  "port"
+                ]
+              },
+              {
+                "required": [
+                  "port_ref"
+                ]
+              }
+            ]
           },
           {
             "type": "object",
