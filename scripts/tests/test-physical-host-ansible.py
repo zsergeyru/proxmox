@@ -2,6 +2,8 @@
 """Contract checks for generic physical-host Ansible and disk read-only gates."""
 from __future__ import annotations
 
+import io
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
 from infra_manager.common import InfraManagerError
 from infra_manager.physical_host_ansible import run_physical_ansible
 from infra_manager.physical_hosts import load_physical_host
+from infra_manager.physical_host_operations import run_physical_host_operation
 
 
 def refuse(fn) -> None:
@@ -119,6 +122,31 @@ def test_native_disk_read_only_contract() -> None:
     assert generic[0]["tasks"][0]["ansible.builtin.include_role"]["name"] == "physical_storage"
 
 
+def test_initial_ssh_trust_is_generic() -> None:
+    with (
+        patch("infra_manager.physical_host_operations.resolve_saved_host", side_effect=lambda h: h),
+        patch("infra_manager.physical_host_operations.require_host_access"),
+        patch("infra_manager.physical_host_operations.bootstrap_physical_host") as bootstrap,
+        patch("infra_manager.physical_host_operations.sys.stdin", io.StringIO("a-secret\n")),
+        patch.dict(os.environ, {"INFRA_PVE_NODE": "pve"}, clear=False),
+    ):
+        assert run_physical_host_operation(ROOT, "bootstrap", "nas") == 0
+        args = bootstrap.call_args.args
+        assert args[0].name == "nas"
+        assert args[1] == "pve"
+        assert args[2] == "a-secret\n"
+    # Invalid or unterminated secret must never be passed to SSH bootstrap.
+    with (
+        patch("infra_manager.physical_host_operations.resolve_saved_host", side_effect=lambda h: h),
+        patch("infra_manager.physical_host_operations.require_host_access"),
+        patch("infra_manager.physical_host_operations.bootstrap_physical_host") as bootstrap,
+        patch("infra_manager.physical_host_operations.sys.stdin", io.StringIO("bad")),
+        patch.dict(os.environ, {"INFRA_PVE_NODE": "pve"}, clear=False),
+    ):
+        refuse(lambda: run_physical_host_operation(ROOT, "bootstrap", "nas"))
+        bootstrap.assert_not_called()
+
+
 def test_driver_is_not_used_for_schema_or_inspect() -> None:
     parser = (
         ROOT / "scripts/infra-manager/infra_manager/physical_hosts.py"
@@ -140,4 +168,5 @@ if __name__ == "__main__":
     test_generic_ansible_transport()
     test_native_disk_read_only_contract()
     test_driver_is_not_used_for_schema_or_inspect()
+    test_initial_ssh_trust_is_generic()
     print("[ОК] Universal Ansible physical host and read-only disk preflight")
