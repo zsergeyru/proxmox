@@ -72,11 +72,12 @@ properties:
         allOf:
           - $ref: '#/$defs/service'
           - type: object
-            required: [url, image, runtime]
+            required: [url, image, container, runtime]
             properties:
               component: {const: apps}
               runtime: {$ref: '#/$defs/qbittorrent_runtime'}
-              url: {const: 'http://{address}:8080/'}
+              url: {const: 'http://{address}:{web_port}/'}
+              container: {const: nas-qbittorrent}
       urbackup:
         allOf:
           - $ref: '#/$defs/service'
@@ -163,11 +164,12 @@ $defs:
       title: {type: string, minLength: 1, maxLength: 100}
       component: {enum: [base, urbackup_server, urbackup_client, apps, smb]}
       image: {type: string, pattern: '^lscr[.]io/linuxserver/qbittorrent:[a-zA-Z0-9_.-]+$'}
+      container: {const: nas-qbittorrent}
       runtime: {$ref: '#/$defs/qbittorrent_runtime'}
       address: {const: auto_omv}
       url:
         type: string
-        pattern: '^https?://(\{address\}|127[.]0[.]0[.]1):[0-9]{2,5}/$'
+        pattern: '^https?://(\{address\}|127[.]0[.]0[.]1):(\{web_port\}|[0-9]{2,5})/$'
       access: {type: string, minLength: 1, maxLength: 200}
       operator: {$ref: '#/$defs/operator'}
     oneOf:
