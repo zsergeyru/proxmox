@@ -98,6 +98,20 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         console.result("SSH-ключ обновлён после подтверждения" if changed else
                        "SSH-ключ физического сервера подтверждён")
         return 0
+    if operation == "bootstrap":
+        # One generic OpenBao/SSH trust bootstrap for ALL physical servers.
+        # A host-specific deployment driver must never own initial access.
+        if not host.address:
+            raise InfraManagerError("Не указан проверенный адрес физического сервера")
+        pve_node = os.environ.get("INFRA_PVE_NODE", "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+            raise InfraManagerError("Не определён доверенный узел PVE")
+        payload = sys.stdin.readline(16385)
+        if not payload or len(payload) > 16384 or not payload.endswith("\\n"):
+            raise InfraManagerError("Некорректный закрытый ввод первого подключения")
+        bootstrap_physical_host(host, pve_node, payload)
+        console.result("SSH-доверие физического сервера установлено через OpenBao")
+        return 0
     if operation == "inspect":
         # Generic, read-only inventory through Ansible. The controller must
         # not interpret vendor-specific disks, shares or services.
