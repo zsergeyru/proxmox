@@ -20,6 +20,7 @@ from .common import InfraManagerError, console, run
 from .physical_host_ssh import PhysicalHostSshSession
 from .guest_status import load_declared_checks, _run_declared_check, _service_fields
 from .physical_nas_ansible import load_nas_provision
+from .physical_nas_backup_policy import load_nas_backup_policy
 from .guest_deploy import project_branch_for_checkout, project_revision as current_project_revision
 
 
@@ -51,7 +52,38 @@ def load_nas_status(repo_root: Path, host_name: str,
         location, identity_field="host", identity_value=host_name,
     )
     active = set(provision["deployment"]["components"]) | {"base"}
-    return tuple(c for c in checks if c["component"] in active)
+    enabled = [dict(c) for c in checks if c["component"] in active]
+    if not any("container_ref" in c or "port_ref" in c for c in enabled):
+        return tuple(enabled)
+
+    # Resolve only audited reference identifiers, never arbitrary YAML paths
+    # or templated shell expressions. The generic status runner receives
+    # ordinary concrete arguments after this host-driver normalization.
+    backup = load_nas_backup_policy(repo_root)
+    sources = {
+        "backup.server.name": backup["server"]["name"],
+        "backup.local_client.container_name": backup["local_client"]["container_name"],
+        "provision.services.qbittorrent.container_name": (
+            provision.get("services", {}).get("qbittorrent", {}).get("container_name")
+        ),
+        "provision.services.qbittorrent.runtime.web_port": (
+            provision.get("services", {}).get("qbittorrent", {})
+            .get("runtime", {}).get("web_port")
+        ),
+    }
+    for check in enabled:
+        for prop in ("container", "port"):
+            ref = check.pop(prop + "_ref", None)
+            if ref is None:
+                continue
+            value = sources.get(ref)
+            if value is None or (prop == "port" and (
+                    isinstance(value, bool) or not isinstance(value, int) or
+                    not 1 <= value <= 65535)) or (prop == "container" and (
+                    not isinstance(value, str) or not value)):
+                raise InfraManagerError("Не удалось разрешить проверяемую ссылку status.yaml")
+            check[prop] = value
+    return tuple(enabled)
 
 
 def verify_nas_services(
