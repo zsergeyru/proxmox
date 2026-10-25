@@ -12,6 +12,12 @@
          playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
          | from_yaml }}
   pre_tasks:
+    - name: Обследовать физические диски стандартной Ansible-ролью
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: inspect.yml
+      vars:
+        physical_storage: "{{ nas_storage }}"
     - name: Повторить независимую Ansible-проверку накопителей до служб
       ansible.builtin.include_role:
         name: nas
