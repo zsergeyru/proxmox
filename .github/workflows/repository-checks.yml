@@ -113,6 +113,9 @@ jobs:
       - name: Check Ansible-only non-destructive NAS preflight
         run: bash scripts/tests/test-nas-ansible-safety.sh
 
+      - name: Check Ansible-only declarative NAS status
+        run: bash scripts/tests/test-nas-ansible-status.sh
+
       - name: Check declarative NAS role and shared host status
         run: python scripts/tests/test-nas-declarative.py
 
@@ -713,6 +716,10 @@ jobs:
             -v "$PWD:/workspace" -w /workspace bootstrap-runtime:test \
             ansible-playbook --syntax-check -i nas, -e nas_deploy_phase=services \
             automation/ansible/playbooks/deploy-nas.yml
+          docker run --rm \
+            -v "$PWD:/workspace" -w /workspace bootstrap-runtime:test \
+            ansible-playbook --syntax-check -i nas, \
+            automation/ansible/playbooks/status-nas.yml
 
       - name: Verify malformed guest directory is rejected
         run: |

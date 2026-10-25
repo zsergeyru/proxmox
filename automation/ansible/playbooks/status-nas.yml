@@ -1,0 +1,31 @@
+---
+# Ansible-only declarative status for the physical NAS.
+# Connection identity is supplied by a trusted generic SSH transport.
+- name: Проверить реальный NAS и объявленные службы без изменений
+  hosts: nas
+  gather_facts: false
+  become: false
+  vars:
+    physical_host_name: nas
+    nas_provision: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/provision.yaml')
+         | from_yaml }}
+    nas_backup_policy: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/backup.yaml')
+         | from_yaml }}
+    nas_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
+         | from_yaml }}
+  tasks:
+    - name: Проверить диски и файловые системы перед опросом служб
+      ansible.builtin.include_role:
+        name: nas
+        tasks_from: verified-storage.yml
+
+    - name: Выполнить проверки по status.yaml без специальных Python-скриптов
+      ansible.builtin.include_role:
+        name: nas
+        tasks_from: declared-status.yml
