@@ -100,8 +100,11 @@ def test_nas_apt_diagnostic_guard() -> None:
     packages = next(item for item in tasks if item.get("name") ==
         "Проверить недостающие пакеты ZFS и Docker")
     assert packages["register"] == "nas_required_packages"
-    assert "docker-compose-plugin" in packages["ansible.builtin.command"]["argv"]
-    assert packages["ansible.builtin.command"]["argv"][2].endswith(r"\n")
+    argv = packages["ansible.builtin.command"]["argv"]
+    assert "nas_provision.system.packages.omv_plugins" in argv
+    assert "nas_provision.system.packages.containers" in argv
+    assert "dpkg-query" in argv and "-W" in argv
+    assert r"\n" in argv
     after_extras = next(item for item in tasks if item.get("name") ==
         "Обновить перечень пакетов после установки OMV-Extras")
     command = after_extras["ansible.builtin.command"]["argv"]
