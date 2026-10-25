@@ -47,6 +47,7 @@ services:
   qbittorrent:
     component: apps
     title: qBittorrent
+    container: nas-qbittorrent
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
     runtime:
       timezone: Etc/UTC
@@ -54,7 +55,7 @@ services:
       torrent_port: 6881
       downloads_directory: downloads
       directories: [downloads, downloads/incomplete, downloads/complete]
-    url: "http://{address}:8080/"
+    url: "http://{address}:{web_port}/"
     operator:
       username: admin
   urbackup:
