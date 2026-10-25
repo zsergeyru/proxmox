@@ -1,0 +1,143 @@
+---
+# Controller-side state is observed identity, not desired state. This role never
+# partitions/formats or tries to recover unknown disks on its own.
+- name: Проверить безопасную политику и имя физической машины
+  ansible.builtin.assert:
+    that:
+      - physical_host_name == physical_storage.host
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Запрещено изменять неизвестный физический сервер
+
+- name: Найти зафиксированную ранее идентичность в состоянии контроллера
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+    get_checksum: false
+  delegate_to: localhost
+  become: false
+  register: physical_identity_file
+
+- name: Отказать при отсутствии или изменении защищённого состояния
+  ansible.builtin.assert:
+    that:
+      - physical_identity_file.stat.exists | default(false)
+      - physical_identity_file.stat.isreg | default(false)
+      - not (physical_identity_file.stat.islnk | default(false))
+      - physical_identity_file.stat.mode == '0600'
+    fail_msg: Нет защищённого подтверждения HDD; любая запись запрещена
+
+- name: Прочитать подтверждённые назначения без изменения файлов
+  ansible.builtin.set_fact:
+    physical_confirmed_state: >-
+      {{ lookup('ansible.builtin.file',
+          '/var/lib/infra-manager/physical-hosts/' ~ physical_host_name ~ '-storage.json')
+          | from_json }}
+
+- name: Проверить адрес и количество ранее подтверждённых накопителей
+  ansible.builtin.assert:
+    that:
+      - physical_confirmed_state.name == physical_host_name
+      - physical_confirmed_state.address == ansible_host
+      - physical_confirmed_state.devices | length == physical_storage.devices | length
+      - physical_confirmed_state.volumes.keys() | list | sort == physical_storage.volumes | map(attribute='id') | list | sort
+    fail_msg: Физический сервер не совпадает с сохранённым назначением
+
+- name: Проверить каждую роль и закреплённые модели дисков
+  ansible.builtin.assert:
+    that:
+      - matched | length == 1
+      - matched[0].serial is string
+      - matched[0].serial | length > 0
+      - matched[0].model == item.model
+      - matched[0].capacity_gb | int == item.capacity_gb | int
+      - item.serial is none or item.serial == matched[0].serial
+    fail_msg: Подтверждение диска {{ item.role }} не совпадает с описанием
+  vars:
+    matched: >-
+      {{ physical_confirmed_state.devices
+         | selectattr('role', 'equalto', item.role) | list }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить сохранённые UUID/GUID и подключение каждого тома
+  ansible.builtin.assert:
+    that:
+      - confirmed is mapping
+      - confirmed.mountpoint is string
+      - confirmed.mountpoint is match('^/[A-Za-z0-9_./-]+$')
+      - item.filesystem_uuid is not defined or item.filesystem_uuid is none or confirmed.filesystem_uuid == item.filesystem_uuid
+      - item.pool_guid is not defined or item.pool_guid is none or confirmed.pool_guid | string == item.pool_guid | string
+      - item.pool is not defined or confirmed.pool == item.pool
+      - item.omv_reference is not defined or item.omv_reference is none or confirmed.omv_reference == item.omv_reference
+    fail_msg: Том {{ item.id }} не соответствует сохранённому UUID/GUID
+  vars:
+    confirmed: "{{ physical_confirmed_state.volumes[item.id] | default({}) }}"
+  loop: "{{ physical_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Прочитать реальные точки подключения без изменений
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "{{ physical_confirmed_state.volumes[item.id].mountpoint }}"
+      - --noheadings
+      - --output
+      - FSTYPE
+  loop: "{{ physical_storage.volumes }}"
+  register: physical_real_mounts
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Сверить фактические типы файловых систем
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == ('ext4' if physical_storage.volumes[index].kind == 'ext4' else 'zfs')
+    fail_msg: Тип ФС для {{ item.item.id }} изменён
+  loop: "{{ physical_real_mounts.results }}"
+  loop_control:
+    index_var: index
+    label: "{{ item.item.id }}"
+
+- name: Подтвердить UUID каждого ext4 через настоящий mount
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --mountpoint
+      - "{{ physical_confirmed_state.volumes[item.id].mountpoint }}"
+      - --source
+      - "UUID={{ physical_confirmed_state.volumes[item.id].filesystem_uuid }}"
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'ext4') | list }}"
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Прочитать настоящие GUID пулов ZFS
+  ansible.builtin.command:
+    argv:
+      - zpool
+      - get
+      - -H
+      - -o
+      - value
+      - guid
+      - "{{ physical_confirmed_state.volumes[item.id].pool }}"
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_pool_guids
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Сверить неизменные GUID физических ZFS-пулов
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == physical_confirmed_state.volumes[item.item.id].pool_guid | string
+    fail_msg: Неизвестный GUID тома {{ item.item.id }}; запись запрещена
+  loop: "{{ physical_pool_guids.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
