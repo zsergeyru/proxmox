@@ -25,17 +25,7 @@
   block:
     - name: Проверить и при необходимости установить диагностические программы
       ansible.builtin.apt:
-        name:
-          - smartmontools
-          - acl
-          - gdisk
-          - e2fsprogs
-          - util-linux
-          - udev
-          - jq
-          - ca-certificates
-          - curl
-          - python3
+        name: "{{ nas_provision.system.packages.diagnostics }}"
         state: present
         update_cache: false
   rescue:
@@ -60,7 +50,7 @@
 
 - name: Включить службу наблюдения за SMART
   ansible.builtin.systemd_service:
-    name: smartmontools.service
+    name: "{{ nas_provision.system.services.smart }}"
     enabled: true
     state: started
 
@@ -81,10 +71,7 @@
 
 - name: Установить зависимости установки пакетов OMV
   ansible.builtin.apt:
-    name:
-      - python3-debian
-      - xz-utils
-      - gnupg
+    name: "{{ nas_provision.system.packages.omv_prerequisites }}"
     state: present
 
 - name: Проверить наличие OMV-Extras
@@ -110,16 +97,7 @@
 
 - name: Проверить недостающие пакеты ZFS и Docker
   ansible.builtin.command:
-    argv:
-      - dpkg-query
-      - -W
-      - '-f=${binary:Package} ${Status}\n'
-      - openmediavault-zfs
-      - openmediavault-compose
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-compose-plugin
+    argv: "{{ ['dpkg-query', '-W', '-f=${binary:Package} ${Status}\\n'] + nas_provision.system.packages.omv_extensions + nas_provision.system.packages.docker }}"
   register: nas_required_packages
   changed_when: false
   failed_when: false
@@ -239,9 +217,7 @@
 
 - name: Установить расширения OMV для ZFS и Docker
   ansible.builtin.apt:
-    name:
-      - openmediavault-zfs
-      - openmediavault-compose
+    name: "{{ nas_provision.system.packages.omv_extensions }}"
     state: present
     update_cache: false
 
@@ -349,17 +325,13 @@
 
 - name: Установить Docker через источник пакетов, управляемый OMV-Extras
   ansible.builtin.apt:
-    name:
-      - docker-ce
-      - docker-ce-cli
-      - containerd.io
-      - docker-compose-plugin
+    name: "{{ nas_provision.system.packages.docker }}"
     state: present
     update_cache: false
 
 - name: Запустить Docker с автоматическим запуском после загрузки NAS
   ansible.builtin.systemd_service:
-    name: docker.service
+    name: "{{ nas_provision.system.services.containers }}"
     enabled: true
     state: started
 
