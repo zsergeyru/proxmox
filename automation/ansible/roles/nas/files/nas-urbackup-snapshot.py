@@ -22,7 +22,13 @@ MOUNT = STAGING / "current"
 GUEST_SOURCE = "/backup-source/current"
 MOUNT_GUARD = "/usr/local/sbin/nas-urbackup-client-mount"
 LOCK = Path("/run/lock/nas-urbackup-snapshot.lock")
-CLIENT = ("docker", "exec", "nas-urbackup-client", "urbackupclientctl")
+def client_command(config: dict) -> tuple[str, ...]:
+    """Only a verified declared Docker container may run backup client commands."""
+    name = config["client_container"]
+    if not isinstance(name, str) or not re.fullmatch(r"nas-[a-z0-9-]+", name):
+        raise SnapshotError("Недопустимое имя контейнера UrBackup Client")
+    return ("docker", "exec", name, "urbackupclientctl")
+
 PREFLIGHT = "/usr/local/sbin/nas-urbackup-safe"
 
 
@@ -40,9 +46,9 @@ def run(*argv: str, timeout: int = 60) -> str:
     return p.stdout.strip()
 
 
-def client_status() -> dict:
+def client_status(config: dict) -> dict:
     """Get client connection status, not its restore-only browse API."""
-    raw = run(*CLIENT, "status")
+    raw = run(*client_command(config), "status")
     try:
         obj = json.loads(raw)
     except ValueError as exc:
@@ -58,10 +64,15 @@ def server_current(config: dict) -> str | None:
     Per upstream, the server updates current only after all files are
     downloaded. A successful client-side transfer alone is not enough.
     """
-    root = Path(config["backup_mount"]) / "urbackup" / "backups"
+    if config["backup_subdir"] != "urbackup/backups":
+        raise SnapshotError("Неподтверждённый каталог резервных файлов")
+    root = Path(config["backup_mount"]) / config["backup_subdir"]
     if root.is_symlink() or not root.is_dir():
         raise SnapshotError("Недостоверен каталог резервного тома UrBackup")
-    client = root / "nas-local"
+    name = config["client_name"]
+    if not isinstance(name, str) or not re.fullmatch(r"nas-[a-z0-9-]+", name):
+        raise SnapshotError("Недостоверное имя логического клиента")
+    client = root / name
     if not client.exists():
         return None
     if client.is_symlink() or not client.is_dir():
@@ -109,7 +120,7 @@ def main() -> int:
                             "-o", "name", "-r", ds)
         if any(name.startswith(ds + "@urbackup-") for name in old_snapshots.splitlines()):
             raise SnapshotError("Сохранился снимок незавершённого задания; нельзя создавать новый")
-        connection = client_status()
+        connection = client_status(config)
         if not connection["servers"] or connection.get("internet_status") != "connected_local":
             raise SnapshotError("UrBackup Client ещё не подключён к локальному серверу")
         previous = server_current(config)
@@ -136,8 +147,10 @@ def main() -> int:
                 raise SnapshotError("Нельзя подтвердить bind-mount согласованного снимка")
             # Verify Docker actually received the *mounted* ZFS snapshot.
             # Directory existence alone would allow a misleading empty backup.
-            mountinfo = run("docker", "exec", "nas-urbackup-client",
-                            "cat", "/proc/self/mountinfo")
+            mountinfo = run(
+                "docker", "exec", config["client_container"],
+                "cat", "/proc/self/mountinfo",
+            )
             if not any(
                 len(fields) > 5 and fields[4] == GUEST_SOURCE
                 and "ro" in fields[5].split(",")
@@ -149,13 +162,13 @@ def main() -> int:
             # Директория клиента существует ТОЛЬКО во время жизни снимка.
             # В остальное время нет пути, из которого UrBackup мог бы
             # автоматически сохранить пустой каталог вместо файлов NAS.
-            run(*CLIENT, "add-backupdir", "-n", "nas-data", "-d", GUEST_SOURCE)
+            run(*client_command(config), "add-backupdir", "-n", "nas-data", "-d", GUEST_SOURCE)
             configured = True
-            if GUEST_SOURCE not in run(*CLIENT, "list-backupdirs"):
+            if GUEST_SOURCE not in run(*client_command(config), "list-backupdirs"):
                 raise SnapshotError("Клиент не подтвердил включение пути ZFS snapshot")
             # Upstream start -f *blocks* until the exact file-backup process
             # reports success. Server-side file organization may continue.
-            run(*CLIENT, "start", "-f", timeout=21600)
+            run(*client_command(config), "start", "-f", timeout=21600)
             deadline = time.monotonic() + 1800
             while time.monotonic() < deadline:
                 current = server_current(config)
@@ -175,7 +188,7 @@ def main() -> int:
                 if created:
                     return 2
             if configured:
-                run(*CLIENT, "remove-backupdir", "-n", "nas-data")
+                run(*client_command(config), "remove-backupdir", "-n", "nas-data")
             if mounted:
                 # Никогда не удалять снимок, пока его читает резервная задача.
                 # При проблеме unmount (busy) оставляем снимок и сообщаем об ошибке.
