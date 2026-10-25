@@ -119,7 +119,7 @@
 
 - name: Подтвердить доступность backend UrBackup в Docker
   ansible.builtin.command:
-    argv: [docker, exec, nas-urbackup-client, urbackupclientctl, status]
+    argv: [docker, exec, "{{ nas_backup_policy.local_client.container_name }}", urbackupclientctl, status]
   register: nas_urbackup_client_ready
   retries: 12
   delay: 5
