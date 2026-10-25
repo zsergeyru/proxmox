@@ -18,6 +18,13 @@
         tasks_from: inspect.yml
       vars:
         physical_storage: "{{ nas_storage }}"
+    - name: Проверить UUID/GUID универсальной ролью до сервисов
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: verified.yml
+      vars:
+        physical_storage: "{{ nas_storage }}"
+      when: nas_deploy_phase == 'services'
     - name: Повторить независимую Ansible-проверку накопителей до служб
       ansible.builtin.include_role:
         name: nas
