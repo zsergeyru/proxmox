@@ -15,12 +15,13 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/drivers"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_nas_status import (
+from omv8_support.physical_nas_status import (
     load_nas_status, _load_nas_status_document, show_nas_status,
 )
-from infra_manager.physical_nas_ansible import load_nas_provision, run_nas_phase
+from omv8_support.physical_nas_ansible import load_nas_provision, run_nas_phase
 from infra_manager.guest_status import (
     load_declared_checks, _run_declared_check, _service_fields,
 )
@@ -261,8 +262,8 @@ def test_nas_smb_password_only_in_trusted_status() -> None:
     config["services"] = {}
     session = SimpleNamespace(host=SimpleNamespace(name="nas", address="192.0.2.12"))
     with (
-        patch("infra_manager.physical_nas_status.project_branch_for_checkout", return_value="main"),
-        patch("infra_manager.physical_nas_status.current_project_revision", return_value="test"),
+        patch("omv8_support.physical_nas_status.project_branch_for_checkout", return_value="main"),
+        patch("omv8_support.physical_nas_status.current_project_revision", return_value="test"),
         patch("infra_manager.physical_host_credentials.read_operator_secret",
               return_value="unit-test-secret") as read_secret,
     ):
