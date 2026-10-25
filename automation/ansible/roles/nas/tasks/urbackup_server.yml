@@ -74,7 +74,10 @@
         'source_mount': nas_data_mountpoint,
         'backup_pool': nas_backup_pool,
         'backup_guid': nas_backup_guid,
-        'backup_mount': nas_backup_mountpoint
+        'backup_mount': nas_backup_mountpoint,
+        'backup_subdir': nas_backup_policy.server.data_subdir,
+        'client_container': nas_backup_policy.local_client.container,
+        'client_name': nas_backup_policy.local_client.name
       } | to_nice_json }}
 
 - name: Проверить GUID и реальные точки подключения до записи
