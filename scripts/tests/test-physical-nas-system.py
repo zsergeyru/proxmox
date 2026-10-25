@@ -13,12 +13,13 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "infra-manager"))
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/drivers"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_nas_system import (
+from omv8_support.physical_nas_system import (
     NasSystem, parse_os_release, parse_omv_mounts, require_omv8,
 )
-from infra_manager.physical_nas_volumes import (
+from omv8_support.physical_nas_volumes import (
     _configured_path, _parse_findmnt, verify_nas_volumes,
 )
 from infra_manager.physical_hosts import load_physical_host
@@ -69,7 +70,7 @@ def test_unconfirmed_volumes() -> None:
     nas = load_physical_host(ROOT, "nas")
     system = NasSystem("13", "8.0", "amd64", ())
     with patch(
-        "infra_manager.physical_nas_volumes.run",
+        "omv8_support.physical_nas_volumes.run",
         return_value=SimpleNamespace(returncode=0, stdout="{}"),
     ) as remote:
         refuses(lambda: verify_nas_volumes(nas, system, SimpleNamespace()))
@@ -90,7 +91,7 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert install["update_cache"] is False
     assert any("getent" in str(entry) for entry in package_step["rescue"])
     assert "На HDD ничего не форматировалось" in str(package_step["rescue"])
-    ansible = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_ansible.py"
+    ansible = (ROOT / "scripts/infra-manager/drivers/omv8_support/physical_nas_ansible.py"
               ).read_text(encoding="utf-8")
     assert '"ANSIBLE_LOG_PATH": "/dev/null"' in ansible
     assert '"ANSIBLE_SSH_TRANSFER_METHOD": "piped"' in ansible
