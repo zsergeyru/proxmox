@@ -104,6 +104,9 @@ jobs:
       - name: Check generic physical Ansible and read-only disk gate
         run: python scripts/tests/test-physical-host-ansible.py
 
+      - name: Check native HDD preparation preflight (no writes)
+        run: python scripts/tests/test-physical-storage-ansible-preflight.py
+
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
 
