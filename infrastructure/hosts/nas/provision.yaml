@@ -37,6 +37,7 @@ services:
     component: apps
     title: qBittorrent
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
+    container_name: nas-qbittorrent
     runtime:
       timezone: Etc/UTC
       web_port: 8080
