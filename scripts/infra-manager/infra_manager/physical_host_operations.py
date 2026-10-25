@@ -107,7 +107,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
             raise InfraManagerError("Не определён доверенный узел PVE")
         payload = sys.stdin.readline(16385)
-        if not payload or len(payload) > 16384 or not payload.endswith("\\n"):
+        if not payload or len(payload) > 16384 or not payload.endswith("\n"):
             raise InfraManagerError("Некорректный закрытый ввод первого подключения")
         bootstrap_physical_host(host, pve_node, payload)
         console.result("SSH-доверие физического сервера установлено через OpenBao")
