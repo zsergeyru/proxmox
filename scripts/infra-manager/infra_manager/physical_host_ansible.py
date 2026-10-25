@@ -24,7 +24,8 @@ def run_physical_ansible(
     session: PhysicalHostSshSession,
     *,
     variables: Mapping[str, object],
-    phase: str,
+    phase: str | None = None,
+    operation: str = "deploy",
     callback: str | None = None,
 ) -> None:
     """Execute the checked deployment playbook using the trusted SSH CA.
@@ -35,9 +36,13 @@ def run_physical_ansible(
     name = session.host.name
     if not _HOST.fullmatch(name) or not session.host.address:
         raise InfraManagerError("Недопустимая или неподтверждённая физическая машина")
-    if phase not in ("base", "services"):
-        raise InfraManagerError("Недопустимый этап Ansible физического сервера")
-    playbook = repo_root / "automation" / "ansible" / "playbooks" / f"deploy-{name}.yml"
+    if operation == "deploy" and phase in ("base", "services"):
+        playbook_name = f"deploy-{name}.yml"
+    elif operation == "inspect" and phase is None:
+        playbook_name = "inspect-physical-storage.yml"
+    else:
+        raise InfraManagerError("Недопустимый Ansible playbook или этап")
+    playbook = repo_root / "automation" / "ansible" / "playbooks" / playbook_name
     inventory = repo_root / "infrastructure" / "hosts" / name / "ansible-inventory.yml"
     if not playbook.is_file() or playbook.is_symlink():
         raise InfraManagerError("Нет проверенного Ansible playbook физического сервера")
@@ -74,7 +79,7 @@ def run_physical_ansible(
                 repo_root / "automation" / "ansible" / "callback_plugins"
             ),
         })
-    console.info(f"Ansible {name}: deploy ({phase})")
+    console.info(f"Ansible {name}: {operation}" + (f" ({phase})" if phase else ""))
     result = run(
         ["ansible-playbook", str(playbook), "-i", str(inventory),
          "-u", session.host.user, "--private-key", private_key,
@@ -83,6 +88,6 @@ def run_physical_ansible(
     )
     if result.returncode:
         raise InfraManagerError(
-            f"Ansible физического сервера ({phase}) остановился "
+            f"Ansible физического сервера ({operation}) остановился "
             f"с кодом {result.returncode}; результат не подтверждён"
         )
