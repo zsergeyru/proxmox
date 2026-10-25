@@ -126,7 +126,7 @@
 # состояние службы: на новой установке smbd может оставаться остановленным.
 - name: Проверить итоговую конфигурацию Samba
   ansible.builtin.command:
-    argv: [samba-tool, testparm, --suppress-prompt]
+    argv: [testparm, -s]
   changed_when: false
 
 - name: Обеспечить запуск Samba после применения OMV
