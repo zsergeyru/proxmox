@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 from .common import InfraManagerError
@@ -27,7 +28,17 @@ def _load_driver(repo_root: Path, driver: str, *, validation_only: bool = False)
     if spec is None or spec.loader is None:
         raise InfraManagerError("Не удалось прочитать драйвер физического сервера")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # The driver and its platform-specific support package live next to the
+    # checked-out driver entry point; they are never installed in core.
+    driver_directory = str(path.parent)
+    inserted = driver_directory not in sys.path
+    if inserted:
+        sys.path.insert(0, driver_directory)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if inserted:
+            sys.path.remove(driver_directory)
     return module
 
 
