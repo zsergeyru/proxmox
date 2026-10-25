@@ -255,7 +255,8 @@ def test_permanent_docker_client_contract():
     ).read_text()
     assert "INTERNET_ONLY=false" in client_defaults
     assert "RESTORE=disabled" in client_defaults
-    assert "name: nas-urbackup-client" in client_compose
+    assert "nas_backup_policy.local_client.container_name" in client_compose
+    assert "nas_backup_policy.server.name" in server_compose
     assert "uroni/urbackup-client" not in server_compose
     assert 'entrypoint: ["/usr/local/sbin/urbackupclientbackend"]' in client_compose
     assert "URBACKUP_CLIENT_AUTHKEY" not in client_compose
@@ -299,7 +300,7 @@ def test_permanent_docker_client_contract():
     assert any(
         item.get("type") == "docker"
         and item.get("component") == "urbackup_client"
-        and item.get("container") == "nas-urbackup-client"
+        and item.get("container_ref") == "backup.local_client.container_name"
         for item in status["checks"]
     )
     assert any(x.get("unit") == "nas-urbackup-client.service"
