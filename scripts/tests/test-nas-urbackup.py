@@ -17,9 +17,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/drivers"))
 
 from infra_manager.common import InfraManagerError
-from infra_manager.physical_nas_backup_policy import (
+from omv8_support.physical_nas_backup_policy import (
     load_nas_backup_policy, verify_nas_backup_volumes,
 )
 
@@ -316,7 +317,7 @@ def test_permanent_docker_client_contract():
     assert load_nas_backup_policy(ROOT)["local_client"]["container"] == "nas-urbackup-client"
     assert any(x.get("unit_from") == "deployment.managed_units.urbackup_client.1"
                for x in status["checks"])
-    physical_status = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_status.py").read_text()
+    physical_status = (ROOT / "scripts/infra-manager/drivers/omv8_support/physical_nas_status.py").read_text()
     assert "load_declared_checks(" in physical_status
     assert "_run_declared_check(" in physical_status
 
