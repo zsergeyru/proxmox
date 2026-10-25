@@ -27,8 +27,7 @@
             "required": [
               "type",
               "message",
-              "component",
-              "unit"
+              "component"
             ],
             "properties": {
               "type": {
@@ -51,8 +50,27 @@
               "unit": {
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9_.@-]+[.](service|timer)$"
+              },
+              "unit_from": {
+                "const": "system.services.containers"
               }
-            }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "unit"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "unit_from"
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           {
             "type": "object",
@@ -60,8 +78,7 @@
             "required": [
               "type",
               "message",
-              "component",
-              "container"
+              "component"
             ],
             "properties": {
               "type": {
@@ -84,8 +101,27 @@
               "container": {
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]+$"
+              },
+              "container_from": {
+                "const": "services.qbittorrent.container"
               }
-            }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "container"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "container_from"
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           {
             "type": "object",
@@ -93,8 +129,7 @@
             "required": [
               "type",
               "message",
-              "component",
-              "port"
+              "component"
             ],
             "properties": {
               "type": {
@@ -118,8 +153,27 @@
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 65535
+              },
+              "port_from": {
+                "const": "services.qbittorrent.runtime.web_port"
               }
-            }
+            },
+            "allOf": [
+              {
+                "oneOf": [
+                  {
+                    "required": [
+                      "port"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "port_from"
+                    ]
+                  }
+                ]
+              }
+            ]
           },
           {
             "type": "object",
