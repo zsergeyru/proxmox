@@ -83,7 +83,7 @@
 
 - name: Получить доступные физические диски без изменений
   ansible.builtin.command:
-    argv: [lsblk, --json, --bytes, --output, NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS]
+    argv: [lsblk, --json, --bytes, --output, "NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,MOUNTPOINTS"]
   register: nas_lsblk_actual
   changed_when: false
 
