@@ -8,7 +8,7 @@ health:
 checks:
   - type: systemd
     component: base
-    unit: docker.service
+    unit_from: system.services.containers
     message: Docker работает
   - type: systemd
     component: smb
@@ -32,11 +32,11 @@ checks:
     message: "UrBackup Client: контейнер запущен"
   - type: docker
     component: apps
-    container: nas-qbittorrent
+    container_from: services.qbittorrent.container
     message: "qBittorrent: контейнер запущен"
   - type: tcp
     component: apps
-    port: 8080
+    port_from: services.qbittorrent.runtime.web_port
     message: "qBittorrent: веб-интерфейс доступен"
   - type: file
     component: urbackup_server
