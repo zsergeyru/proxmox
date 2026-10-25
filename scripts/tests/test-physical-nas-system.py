@@ -90,12 +90,15 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert install["update_cache"] is False
     assert any("getent" in str(entry) for entry in package_step["rescue"])
     assert "На HDD ничего не форматировалось" in str(package_step["rescue"])
-    ansible = (ROOT / "scripts/infra-manager/infra_manager/physical_nas_ansible.py"
+    ansible = (ROOT / "scripts/infra-manager/infra_manager/physical_host_ansible.py"
               ).read_text(encoding="utf-8")
     assert '"ANSIBLE_LOG_PATH": "/dev/null"' in ansible
     assert '"ANSIBLE_SSH_TRANSFER_METHOD": "piped"' in ansible
-    assert '"ANSIBLE_STDOUT_CALLBACK": "infra_nas_compact"' in ansible
+    assert '"ANSIBLE_STDOUT_CALLBACK": callback' in ansible
     assert '"ANSIBLE_CALLBACK_PLUGINS": str(' in ansible
+    assert 'callback="infra_nas_compact"' in (
+        ROOT / "scripts/infra-manager/infra_manager/physical_nas_ansible.py"
+    ).read_text(encoding="utf-8")
     assert '"ansible_python_interpreter": "/usr/bin/python3"' in ansible
     packages = next(item for item in tasks if item.get("name") ==
         "Проверить недостающие пакеты ZFS и Docker")
