@@ -14,12 +14,13 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts/infra-manager"))
+sys.path.insert(0, str(ROOT / "scripts/infra-manager/drivers"))
 sys.path.insert(0, str(ROOT / "scripts/infra-manager/host"))
 
 from infra_manager.common import InfraManagerError
 from infra_manager.physical_hosts import load_physical_host
-from infra_manager.physical_nas_storage_prepare import _check_result
-from infra_manager.physical_nas_storage_state import (
+from omv8_support.physical_nas_storage_prepare import _check_result
+from omv8_support.physical_nas_storage_state import (
     apply_saved_storage, save_storage_identity,
 )
 from infra_manager.physical_storage import DiskInspection
@@ -203,7 +204,7 @@ def test_storage_state():
             "serials": {item.role: item.serial for item in plan.assignments
                         if item.role != "system"}}
     complete = _check_result(host, plan, data)
-    from infra_manager import physical_nas_storage_state as state
+    from omv8_support import physical_nas_storage_state as state
     with tempfile.TemporaryDirectory() as folder:
         (Path(folder) / "physical-hosts").mkdir()
         with patch.object(state, "PATHS", SimpleNamespace(data_dir=Path(folder))):
@@ -652,10 +653,10 @@ def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
             for item in first_plan.assignments if item.role != "system"
         ],
     }
-    from infra_manager.physical_nas_storage_prepare import read_pending_recovery
+    from omv8_support.physical_nas_storage_prepare import read_pending_recovery
     mock_session = SimpleNamespace(command=lambda text: ("ssh", text))
     with patch(
-        "infra_manager.physical_nas_storage_prepare.run",
+        "omv8_support.physical_nas_storage_prepare.run",
         return_value=SimpleNamespace(returncode=0, stdout=json.dumps(journal)),
     ):
         assert read_pending_recovery(host, mock_session, current_plan) == journal
@@ -664,13 +665,13 @@ def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
         "data": {"pool_guid": "123456789"},
         "backup": {"pool_guid": "987654321"},
     })
-    with patch("infra_manager.physical_nas_storage_prepare.run") as remote:
+    with patch("omv8_support.physical_nas_storage_prepare.run") as remote:
         assert read_pending_recovery(completed_host, mock_session, current_plan) is None
         remote.assert_not_called()
     wrong = dict(journal)
     wrong["fingerprint"] = "0" * 64
     with patch(
-        "infra_manager.physical_nas_storage_prepare.run",
+        "omv8_support.physical_nas_storage_prepare.run",
         return_value=SimpleNamespace(returncode=0, stdout=json.dumps(wrong)),
     ):
         refuses(lambda: read_pending_recovery(host, mock_session, current_plan),
