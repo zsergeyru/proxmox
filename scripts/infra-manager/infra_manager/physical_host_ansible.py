@@ -58,6 +58,7 @@ def run_physical_ansible(
     data = dict(variables)
     # SSH target is set from the verified session, never caller supplied YAML.
     data.update({
+        "physical_host_name": name,
         "ansible_host": session.host.address,
         "ansible_ssh_common_args": ssh_args,
         "ansible_python_interpreter": "/usr/bin/python3",
