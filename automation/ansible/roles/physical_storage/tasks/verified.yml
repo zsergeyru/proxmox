@@ -62,6 +62,23 @@
   loop_control:
     label: "{{ item.role }}"
 
+- name: Сверить реальные серийные номера с подтверждённым контроллером
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - actual[0].model is string
+      - item.model in actual[0].model | trim
+      - actual[0].size | int >= (item.capacity_gb | int) * 900000000
+      - actual[0].size | int <= (item.capacity_gb | int) * 1100000000
+    fail_msg: Физический накопитель {{ item.role }} подменён или отсутствует
+  vars:
+    actual: >-
+      {{ physical_actual_disks
+         | selectattr('serial', 'equalto', item.serial) | list }}
+  loop: "{{ physical_confirmed_state.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
 - name: Проверить сохранённые UUID/GUID и подключение каждого тома
   ansible.builtin.assert:
     that:
