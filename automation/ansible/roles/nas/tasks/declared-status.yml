@@ -1,0 +1,132 @@
+---
+# Service checks are pure Ansible tasks, selected by status.yaml.
+# No NAS-specific Python status runner is needed for these observations.
+- name: Загрузить декларацию статуса без запуска кода
+  ansible.builtin.set_fact:
+    nas_declared_status: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/status.yaml')
+         | from_yaml }}
+
+- name: Проверить идентичность и безопасные типы проверок статуса
+  ansible.builtin.assert:
+    that:
+      - nas_declared_status.host == physical_host_name
+      - nas_declared_status.schema_version == 2
+      - nas_declared_status.checks | length > 0
+      - nas_declared_status.checks | selectattr('type', 'undefined') | list | length == 0
+      - nas_declared_status.checks | map(attribute='type') | unique | difference(['systemd', 'docker', 'tcp', 'file']) | length == 0
+    fail_msg: Некорректные проверки status.yaml; обход произвольных команд запрещён
+
+- name: Разрешить строго объявленные ссылки статуса
+  ansible.builtin.set_fact:
+    nas_status_reference_values:
+      system.services.containers: "{{ nas_provision.system.services.containers }}"
+      deployment.managed_units.smb.0: "{{ nas_provision.deployment.managed_units.smb[0] }}"
+      deployment.managed_units.urbackup_server.1: "{{ nas_provision.deployment.managed_units.urbackup_server[1] }}"
+      deployment.managed_units.urbackup_client.1: "{{ nas_provision.deployment.managed_units.urbackup_client[1] }}"
+      backup.server.name: "{{ nas_backup_policy.server.name }}"
+      backup.local_client.container: "{{ nas_backup_policy.local_client.container }}"
+      services.qbittorrent.container: "{{ nas_provision.services.qbittorrent.container }}"
+      services.qbittorrent.runtime.web_port: "{{ nas_provision.services.qbittorrent.runtime.web_port }}"
+
+- name: Исключить неизвестные ссылки и необъявленные компоненты
+  ansible.builtin.assert:
+    that:
+      - item.component in nas_provision.deployment.components + ['base']
+      - item.type != 'systemd' or item.unit_from in nas_status_reference_values
+      - item.type != 'docker' or item.container_from in nas_status_reference_values
+      - item.type != 'tcp' or item.port_from in nas_status_reference_values
+      - item.type != 'file' or item.path in ['/etc/nas-apps/urbackup/initialized']
+    fail_msg: Проверка запрашивает необъявленную команду или путь
+  loop: "{{ nas_declared_status.checks | selectattr('component', 'in', nas_provision.deployment.components + ['base']) | list }}"
+  loop_control:
+    label: "{{ item.message }}"
+
+- name: Получить фактическое состояние systemd без изменений
+  ansible.builtin.service_facts:
+
+- name: Проверить включённые systemd-службы из status.yaml
+  ansible.builtin.assert:
+    that:
+      - unit in ansible_facts.services
+      - ansible_facts.services[unit].state == 'running'
+    fail_msg: "{{ item.message }} — служба не запущена"
+    success_msg: "{{ item.message }}"
+  vars:
+    unit: "{{ nas_status_reference_values[item.unit_from] }}"
+  loop: >-
+    {{ nas_declared_status.checks
+       | selectattr('type', 'equalto', 'systemd')
+       | selectattr('component', 'in', nas_provision.deployment.components + ['base'])
+       | list }}
+  loop_control:
+    label: "{{ item.message }}"
+
+- name: Проверить Docker-контейнеры без изменения их состояния
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - --format
+      - "{{ '{{.State.Running}}' }}"
+      - "{{ nas_status_reference_values[item.container_from] }}"
+  loop: >-
+    {{ nas_declared_status.checks
+       | selectattr('type', 'equalto', 'docker')
+       | selectattr('component', 'in', nas_provision.deployment.components + ['base'])
+       | list }}
+  register: nas_declared_docker
+  changed_when: false
+  loop_control:
+    label: "{{ item.message }}"
+
+- name: Убедиться, что проверяемые контейнеры работают
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == 'true'
+    fail_msg: "{{ item.item.message }} — контейнер не работает"
+    success_msg: "{{ item.item.message }}"
+  loop: "{{ nas_declared_docker.results }}"
+  loop_control:
+    label: "{{ item.item.message }}"
+
+- name: Проверить TCP-порты заявленных приложений
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ nas_status_reference_values[item.port_from] | int }}"
+    state: started
+    timeout: 5
+    connect_timeout: 2
+  loop: >-
+    {{ nas_declared_status.checks
+       | selectattr('type', 'equalto', 'tcp')
+       | selectattr('component', 'in', nas_provision.deployment.components + ['base'])
+       | list }}
+  loop_control:
+    label: "{{ item.message }}"
+
+- name: Проверить наличие объявленных файлов состояния без чтения секретов
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: >-
+    {{ nas_declared_status.checks
+       | selectattr('type', 'equalto', 'file')
+       | selectattr('component', 'in', nas_provision.deployment.components + ['base'])
+       | list }}
+  register: nas_declared_files
+  loop_control:
+    label: "{{ item.message }}"
+
+- name: Убедиться в наличии безопасных файлов состояния
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isreg | default(false)
+      - not item.stat.islnk | default(false)
+    fail_msg: "{{ item.item.message }} — файл не найден или подменён"
+    success_msg: "{{ item.item.message }}"
+  loop: "{{ nas_declared_files.results }}"
+  loop_control:
+    label: "{{ item.item.message }}"
