@@ -73,6 +73,7 @@
     physical_plan_available: "{{ physical_actual_disks }}"
     physical_plan_assignments: []
     physical_plan_fingerprint_items: []
+    physical_plan_layout_ready: true
 
 - name: Назначить каждую роль только уникальному проверенному физическому диску
   ansible.builtin.include_tasks: plan-assign.yml
@@ -90,6 +91,16 @@
       - physical_plan_assignments | selectattr('role', 'equalto', 'system') | map(attribute='serial') | first == physical_plan_root.stdout | trim
       - physical_plan_assignments[0].role == 'system'
     fail_msg: Невозможно подтвердить полное назначение накопителей
+
+- name: Не пересоздавать уже правильно размеченные и проверяемые ext4/ZFS
+  ansible.builtin.set_fact:
+    physical_plan_assignments: >-
+      {{ physical_plan_assignments | map('combine', {'action': 'preserve'}) | list }}
+    physical_plan_fingerprint_items: >-
+      {{ physical_plan_fingerprint_items | map('combine', {'action': 'preserve'}) | list }}
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_layout_ready | bool
 
 - name: Вычислить неизменный отпечаток физического плана
   ansible.builtin.set_fact:
