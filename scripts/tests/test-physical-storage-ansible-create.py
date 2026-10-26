@@ -109,8 +109,8 @@ def test_recovery_is_strictly_read_only() -> None:
     assert len(tasks) >= 10
     assert "physical_recovery_journal_stat" in str(tasks)
     assert "physical_recovery_journal_bytes" in str(tasks)
-    assert "physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint" in str(tasks)
-    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in str(tasks)
+    assert "physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint" in str(tasks)
+    assert "physical_recovery_journal['items'] == physical_recovery_intent['items']" in str(tasks)
     assert "physical_recovery_ext4" in str(tasks)
     assert "physical_recovery_guids" in str(tasks)
     assert "physical_recovery_zpool_status" in str(tasks)
@@ -171,7 +171,7 @@ def test_omv_recovery_audit_is_read_only() -> None:
     assert "nas_omv_existing_mounts" in str(audit)
     assert "by_directory" in str(audit)
     assert "by_source" in str(audit)
-    assert "physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint" in str(audit)
+    assert "physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint" in str(audit)
     playbook = yaml.safe_load(
         (ROOT / "automation/ansible/playbooks/inspect-nas-storage-recovery.yml").read_text(
             encoding="utf-8"
@@ -195,7 +195,7 @@ def test_omv_native_registration_is_safe_and_disconnected() -> None:
         ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
     ).read_text(encoding="utf-8")
     assert len(role) >= 10
-    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in source
+    assert "physical_recovery_journal['items'] == physical_recovery_intent['items']" in source
     assert "nas_omv_registration_authorized" in source
     assert "physical_recovery_ext4.results | length == 1" in source
     assert "physical_recovery_guids.results | length == 2" in source
@@ -357,7 +357,7 @@ def test_generic_observed_state_persistence_is_one_shot() -> None:
     assert "physical_storage_state_commit_authorized" in source
     assert "physical_state_ssh_identity.fingerprint" in source
     assert "physical_state_ssh_identity.address == ansible_host" in source
-    assert "physical_observed_storage.plan_fingerprint == physical_disk_intent.fingerprint" in source
+    assert "physical_observed_storage.plan_fingerprint == physical_recovery_intent.fingerprint" in source
     assert "physical_state_legacy_file" in source
     assert "physical_state_existing_bytes.content | b64decode | from_json" in source
     assert "physical_storage_state_document" in source
@@ -420,7 +420,8 @@ def test_disabled_recovery_transaction_has_strict_order() -> None:
     gate = tasks[0]["ansible.builtin.assert"]["that"]
     assert any("nas_omv_registration_authorized" in item for item in gate)
     assert any("physical_storage_state_commit_authorized" in item for item in gate)
-    assert any("physical_disk_intent.mode == 'recover'" in item for item in gate)
+    assert any("physical_recovery_intent.mode == 'recover'" in item for item in gate)
+    assert any("physical_recovery_intent.fingerprint == physical_disk_intent.fingerprint" in item for item in gate)
     sequence = []
     for task in tasks[1:-1]:
         if "ansible.builtin.include_role" in task:
@@ -474,7 +475,7 @@ def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
         "prepare-write.yml",
         "prepare-recover-complete.yml",
     ]
-    assert tasks[4]["ansible.builtin.set_fact"]["physical_disk_intent"] == (
+    assert tasks[4]["ansible.builtin.set_fact"]["physical_recovery_intent"] == (
         "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
     )
     assert "ansible.builtin.debug" in tasks[-1]
