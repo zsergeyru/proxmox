@@ -269,9 +269,11 @@
       {{ nas_retention_archive.value.split('&')
          | reject('equalto', '')
          | reject('match', '^(uuid_|next_archival_|timeleft_)')
+         | map('ansible.builtin.urldecode')
          | list | sort }}
     nas_retention_desired_parts: >-
-      {{ (nas_retention_desired_rules | urlencode).split('&') | sort }}
+      {{ (nas_retention_desired_rules | urlencode).split('&')
+         | map('ansible.builtin.urldecode') | list | sort }}
   no_log: true
 
 - name: Определить идемпотентность клиентского архива
@@ -350,6 +352,7 @@
         (nas_retention_verified_archive.value.split('&') |
          reject('equalto', '') |
          reject('match', '^(uuid_|next_archival_|timeleft_)') |
+         map('ansible.builtin.urldecode') |
          list | sort) == nas_retention_desired_parts
     fail_msg: UrBackup не подтвердил сохранённые правила nas-local
   no_log: true
