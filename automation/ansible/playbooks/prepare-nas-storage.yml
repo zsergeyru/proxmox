@@ -30,12 +30,37 @@
         msg: Контроллер и Ansible подтвердили действующую идентичность дисков
       when: physical_plan_previous.stat.exists | default(false)
 
+    - name: Завершить прежний полный journal-first цикл без форматирования
+      ansible.builtin.include_role:
+        name: nas
+        tasks_from: prepare-recover-complete.yml
+      vars:
+        physical_disk_intent:
+          schema_version: 1
+          host: "{{ physical_host_name }}"
+          mode: recover
+          fingerprint: "{{ physical_plan_recovery_journal.fingerprint }}"
+          items: "{{ physical_plan_recovery_journal['items'] }}"
+        physical_recovery_intent:
+          schema_version: 1
+          host: "{{ physical_host_name }}"
+          mode: recover
+          fingerprint: "{{ physical_plan_recovery_journal.fingerprint }}"
+          items: "{{ physical_plan_recovery_journal['items'] }}"
+        nas_omv_registration_authorized: true
+        physical_storage_state_commit_authorized: true
+      when:
+        - not (physical_plan_previous.stat.exists | default(false))
+        - physical_plan_previous_journal.stat.exists | default(false)
+        - physical_plan_layout_ready | bool
+
     - name: Принять существующие ext4/ZFS после независимой сверки
       ansible.builtin.include_role:
         name: nas
         tasks_from: adopt-storage.yml
       when:
         - not (physical_plan_previous.stat.exists | default(false))
+        - not (physical_plan_previous_journal.stat.exists | default(false))
         - physical_plan_assignments | map(attribute='action') | unique | list == ['preserve']
 
     - name: Создать ФС только на действительно пустых ранее утверждённых HDD
@@ -44,6 +69,7 @@
         tasks_from: initialize-blank.yml
       when:
         - not (physical_plan_previous.stat.exists | default(false))
+        - not (physical_plan_previous_journal.stat.exists | default(false))
         - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='action') | unique | list == ['recreate']
 
     - name: Проверить полную идентичность HDD в permanent state 910
