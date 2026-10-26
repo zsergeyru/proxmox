@@ -292,3 +292,8 @@
       Все физические диски и скрытые сигнатуры проверены,
       но подготовка не запущена: этот Ansible-этап
       не размечает и не форматирует HDD.
+
+- name: Проверить существующий ext4 по UUID и реальному mount перед записью на другие HDD
+  ansible.builtin.include_tasks: prepare-preserved-ext4.yml
+  when: >-
+    physical_disk_intent['items'] | selectattr('action', 'equalto', 'preserve') | list | length > 0
