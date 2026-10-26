@@ -184,21 +184,25 @@ def test_role_and_no_application_specific_deploy_in_python() -> None:
     for name in paths:
         tasks = yaml.safe_load((prefix / "roles/nas/tasks" / name).read_text())
         assert isinstance(tasks, list) and len(tasks) > 4, name
-    control = (
-        ROOT / "scripts/infra-manager/drivers/omv8.py"
+    controller = (
+        ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
     ).read_text()
-    assert "run_nas_phase(" in control
-    assert "configure_nas_urbackup(" not in control
-    assert "configure_nas_smb(" not in control
-    core = (ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py").read_text()
-    assert "run_nas_phase" not in core
-    assert "physical_nas" not in core
-    assert control.index('run_nas_phase(\n                    repo_root, session, "base"') < (
-        control.index("verified = verify_nas_volumes(")
-    )
-    assert control.index("verify_nas_backup_volumes(\n") < (
-        control.index('run_nas_phase(\n                    repo_root, session, "services"')
-    )
+    assert "run_host_driver" not in controller
+    assert "physical_host_drivers" not in controller
+    assert "physical_nas" not in controller
+    assert "run_physical_ansible(" in controller
+    assert 'operation="status"' in controller
+    assert 'phase=phase' in controller
+    assert "for phase in host.phases" in controller
+    # The host playbook loads its own service policy and maps immutable
+    # verified disk identities into service variables.
+    vars_ = entry[0]["vars"]
+    assert "nas_provision" in vars_ and "nas_backup_policy" in vars_
+    pre_tasks = entry[0]["pre_tasks"]
+    assert pre_tasks[0]["ansible.builtin.include_role"]["tasks_from"] == "inspect.yml"
+    assert pre_tasks[1]["ansible.builtin.include_role"]["tasks_from"] == "verified.yml"
+    assert pre_tasks[2]["ansible.builtin.include_role"]["tasks_from"] == "verified-storage.yml"
+    assert any("nas_confirmed_state.volumes.shared" in str(task) for task in pre_tasks)
 
 
 def test_shared_status_parser_and_secret_control() -> None:
@@ -300,7 +304,8 @@ def test_generic_physical_host_boundary() -> None:
     assert "prompt_nas_smb_password" not in thin_host
     assert "prompt_physical_credentials" not in thin_host
     assert "prepare_physical_host" in thin_host
-    assert (ROOT / "scripts/infra-manager/drivers/omv8.py").is_file()
+    assert not (ROOT / "scripts/infra-manager/drivers/omv8.py").exists()
+    assert not (ROOT / "scripts/infra-manager/infra_manager/physical_host_drivers.py").exists()
     manifest = yaml.safe_load((ROOT / "infrastructure/hosts/nas/operator.yaml").read_text())
     assert manifest["credentials"][0]["id"] == "smb"
     assert manifest["credentials"][0]["status"]["title"] == "Samba (SMB)"
