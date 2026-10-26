@@ -11,6 +11,22 @@
       {{ lookup('ansible.builtin.file',
          playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
          | from_yaml }}
+    nas_provision: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/provision.yaml')
+         | from_yaml }}
+    nas_backup_policy: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/backup.yaml')
+         | from_yaml }}
+    nas_deployment_access: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/access.yaml')
+         | from_yaml }}
+    nas_global_accounts: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/users.yaml')
+         | from_yaml }}
   pre_tasks:
     - name: Обследовать физические диски стандартной Ansible-ролью
       ansible.builtin.include_role:
@@ -29,6 +45,21 @@
       ansible.builtin.include_role:
         name: nas
         tasks_from: verified-storage.yml
+      when: nas_deploy_phase == 'services'
+    - name: Сформировать параметры служб только из проверенного состояния
+      ansible.builtin.set_fact:
+        nas_shared_mount: "{{ nas_confirmed_state.volumes.shared.mountpoint }}"
+        nas_shared_uuid: "{{ nas_confirmed_state.volumes.shared.filesystem_uuid }}"
+        nas_shared_ref: "{{ nas_confirmed_state.volumes.shared.omv_reference }}"
+        nas_data_pool: "{{ nas_confirmed_state.volumes.data.pool }}"
+        nas_data_guid: "{{ nas_confirmed_state.volumes.data.pool_guid }}"
+        nas_data_mountpoint: "{{ nas_confirmed_state.volumes.data.mountpoint }}"
+        nas_data_ref: "{{ nas_confirmed_state.volumes.data.omv_reference }}"
+        nas_backup_pool: "{{ nas_confirmed_state.volumes.backup.pool }}"
+        nas_backup_guid: "{{ nas_confirmed_state.volumes.backup.pool_guid }}"
+        nas_backup_mountpoint: "{{ nas_confirmed_state.volumes.backup.mountpoint }}"
+        nas_urbackup_client_name: "{{ nas_backup_policy.local_client.name }}"
+        nas_access_policy: "{{ nas_deployment_access | combine({'users': nas_global_accounts.users | map(attribute='name') | list}) }}"
       when: nas_deploy_phase == 'services'
   roles:
     - role: nas
