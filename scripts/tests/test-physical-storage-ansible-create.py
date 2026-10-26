@@ -17,6 +17,45 @@ def read(name: str):
     return result
 
 
+def test_recreate_preflight_is_strictly_non_destructive() -> None:
+    """Reinitialize intent never means that a mount or system disk is safe."""
+    tasks = read("prepare-recreate-preflight.yml")
+    commands = []
+    for task in tasks:
+        modules = [k for k in task if k.startswith("ansible.builtin.")]
+        assert len(modules) == 1, task.get("name")
+        assert modules[0] in {
+            "ansible.builtin.assert", "ansible.builtin.set_fact",
+            "ansible.builtin.stat", "ansible.builtin.find",
+            "ansible.builtin.command", "ansible.builtin.include_role",
+            "ansible.builtin.debug",
+        }
+        if modules[0] == "ansible.builtin.command":
+            assert task.get("changed_when") is False, task["name"]
+            cmd = task["ansible.builtin.command"]["argv"]
+            assert cmd[0] in {"lsblk", "jq", "readlink"}, cmd
+            commands.append(cmd[0])
+        if modules[0] == "ansible.builtin.include_role":
+            assert task[modules[0]] == {
+                "name": "physical_storage", "tasks_from": "inspect.yml",
+            }
+    assert set(commands) == {"lsblk", "jq", "readlink"}
+    source = (ROLE / "prepare-recreate-preflight.yml").read_text()
+    assert "physical_storage.initialization.recreate_once" in source
+    assert "physical_disk_recreate_authorized" in source
+    assert "physical_disk_intent.fingerprint" in source
+    assert "physical_recreate_previous_state" in source
+    assert "physical_recreate_previous_journal" in source
+    assert "physical_recreate_by_id" in source
+    assert "physical_recreate_actual" in source
+    assert "mountpoints" in source
+    assert "select(any(.. | objects | .mountpoints? | arrays | .[]; . == \"/\"))" in source
+    # No production playbook includes this role until the rest of the
+    # interruption-safe state machine has been verified.
+    for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
+        assert "prepare-recreate-preflight.yml" not in playbook.read_text(), playbook
+
+
 def test_one_shot_journal() -> None:
     tasks = read("prepare-journal.yml")
     copies = [t["ansible.builtin.copy"] for t in tasks
@@ -528,6 +567,7 @@ def test_item_key_never_collides_with_dict_method() -> None:
 
 
 if __name__ == "__main__":
+    test_recreate_preflight_is_strictly_non_destructive()
     test_one_shot_journal()
     test_write_stage_is_gated_and_not_connected()
     test_item_key_never_collides_with_dict_method()
