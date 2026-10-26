@@ -3,6 +3,7 @@
 schema_version: 1
 host: nas
 # Existing disks are adopted and checked; deploy never creates or wipes HDDs.
+# Serial-to-role assignments confirmed by 2026-10-23 physical NAS diagnostics.
 # Any incomplete/foreign layout fails closed until investigated outside deploy.
 devices:
   - id: system
@@ -15,19 +16,19 @@ devices:
     role: shared
     model: ST1000DM003
     capacity_gb: 1000
-    serial: null
+    serial: Z4Y4DB7V
     by_id: null
   - id: data
     role: data
     model: ST4000VX016
     capacity_gb: 4000
-    serial: null
+    serial: WW692JZ4
     by_id: null
   - id: backup
     role: backup
     model: ST4000VX016
     capacity_gb: 4000
-    serial: null
+    serial: WW69BCHK
     by_id: null
 volumes:
   - id: shared
