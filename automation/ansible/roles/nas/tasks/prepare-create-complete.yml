@@ -42,9 +42,9 @@
 
 # Recovery of the same in-progress one-shot journal NEVER runs the writer.
 # Instead verify what already exists, register OMV, then save identities.
-- name: Перейти от созданных дисков к независимой проверке старого журнала
+- name: Вычислить отдельный план проверки без изменения утверждённых extra-vars
   ansible.builtin.set_fact:
-    physical_disk_intent: "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
+    physical_recovery_intent: "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
 
 - name: Проверить и зарегистрировать созданные тома без новой разметки
   ansible.builtin.include_tasks: prepare-recover-complete.yml
