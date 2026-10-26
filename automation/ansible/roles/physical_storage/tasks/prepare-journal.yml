@@ -1,0 +1,94 @@
+---
+# One-shot journal for a *separate* future native Ansible first-create playbook.
+# It must never be called by ordinary deploy, status, or repair. Presence of
+# either journal is an unconditional refusal to format again.
+- name: Требовать полностью завершённый незаписывающий preflight
+  ansible.builtin.assert:
+    that:
+      - physical_disk_intent is mapping
+      - physical_disk_intent.mode == 'first-create'
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_preparation_by_id is mapping
+      - physical_preparation_by_id.keys() | list | sort == physical_disk_intent['items'] | map(attribute='role') | list | sort
+      - physical_preparation_wipefs is defined
+      - physical_preparation_blkid is defined
+      - physical_preparation_pool is defined
+      - physical_preparation_journal is defined
+      - not (physical_preparation_journal.stat.exists | default(false))
+      - not (physical_preparation_saved.stat.exists | default(false))
+    fail_msg: Нет проверенного и явно подтверждённого плана HDD; журнал не создан
+
+- name: Убедиться в отсутствии прежнего итогового отчёта HDD
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation-result.json
+    follow: false
+  register: physical_preparation_old_result
+
+- name: Запретить создание нового журнала после завершённой подготовки
+  ansible.builtin.assert:
+    that:
+      - not (physical_preparation_old_result.stat.exists | default(false))
+      - not (physical_preparation_old_result.stat.islnk | default(false))
+    fail_msg: Итоги предыдущей подготовки HDD уже существуют; повторная запись запрещена
+
+- name: Проверить родительский каталог журнала
+  ansible.builtin.stat:
+    path: /etc/nas-apps
+    follow: false
+  register: physical_preparation_directory
+
+- name: Не разрешать ссылки или неожиданные каталоги для журнала
+  ansible.builtin.assert:
+    that:
+      - not (physical_preparation_directory.stat.islnk | default(false))
+      - not (physical_preparation_directory.stat.exists | default(false)) or (physical_preparation_directory.stat.isdir | default(false))
+      - not (physical_preparation_directory.stat.exists | default(false)) or (physical_preparation_directory.stat.pw_name == 'root')
+    fail_msg: Неподтверждённый каталог состояния NAS; подготовка запрещена
+
+- name: Создать отсутствующий каталог журнала с закрытыми правами
+  ansible.builtin.file:
+    path: /etc/nas-apps
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: not (physical_preparation_directory.stat.exists | default(false))
+
+- name: Однократно записать журнал ДО любых команд разметки
+  ansible.builtin.copy:
+    dest: /etc/nas-apps/storage-preparation.json
+    content: "{{ {'fingerprint': physical_disk_intent.fingerprint, 'items': physical_disk_intent['items'], 'state': 'started'} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+    follow: false
+    unsafe_writes: false
+  register: physical_preparation_journal_written
+  no_log: true
+
+- name: Требовать фактическое создание нового журнала
+  ansible.builtin.assert:
+    that:
+      - physical_preparation_journal_written is changed
+    fail_msg: Старый журнал уже существует; разметка и форматирование запрещены
+
+- name: Прочитать журнал после однократной записи
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/storage-preparation.json
+  register: physical_preparation_written_document
+  no_log: true
+
+- name: Проверить неизменность подтверждённого плана на носителе
+  ansible.builtin.assert:
+    that:
+      - (physical_preparation_written_document.content | b64decode | from_json).fingerprint == physical_disk_intent.fingerprint
+      - (physical_preparation_written_document.content | b64decode | from_json)['items'] == physical_disk_intent['items']
+      - (physical_preparation_written_document.content | b64decode | from_json).state == 'started'
+    fail_msg: Журнал не соответствует подтверждённому плану, запись HDD запрещена
+  no_log: true
+
+- name: Разрешить только текущей Ansible-сессии продолжить подготовку
+  ansible.builtin.set_fact:
+    physical_preparation_journal_committed: true
