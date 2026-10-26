@@ -1,0 +1,163 @@
+---
+# Proof of preserved, already-mounted ext4 HDD. No writes, no remount,
+# no fallback to another disk, no partition guessing.
+# Requires prepare-preflight.yml (live tree + verified serial/by-id).
+- name: Выбрать только явно сохранённые ext4-тома
+  ansible.builtin.set_fact:
+    physical_preserved_ext4_items: >-
+      {{ physical_disk_intent['items']
+         | selectattr('action', 'equalto', 'preserve') | list }}
+
+- name: Запретить использование preserve для других файловых систем
+  ansible.builtin.assert:
+    that:
+      - volumes | length == 1
+      - volumes[0].kind == 'ext4'
+      - disk | length == 1
+      - disk[0].pttype | default('') in ['gpt', '', none]
+      - disk[0].children | default([], true) | length <= 1
+    fail_msg: Сохраняемый HDD не является однозначным ext4-томом
+  vars:
+    volumes: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_preserved_ext4_items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сверить существующую файловую систему без записи
+  ansible.builtin.assert:
+    that:
+      - filesystem.type | default('') in ['part', 'disk']
+      - filesystem.fstype == 'ext4'
+      - filesystem.uuid is match('^[a-fA-F0-9-]{16,40}$')
+      - filesystem.path is match('^/dev/[a-zA-Z0-9._/-]+$')
+      - (disk[0].children | default([], true) | length == 0) or filesystem.type == 'part'
+      - (filesystem.children | default([], true) | length) == 0
+    fail_msg: Не подтверждён существующий ext4 на выбранном физическом HDD
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_items }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Прочитать неизменный UUID существующего ext4 через blkid
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, "{{ filesystem.path }}"]
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_items }}"
+  register: physical_preserved_ext4_uuids
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Запретить подмену UUID сохранённого ext4
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == filesystem.uuid
+      - item.stdout | trim is match('^[a-fA-F0-9-]{16,40}$')
+    fail_msg: Фактический ext4 UUID не соответствует размеченному HDD
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_uuids.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Прочитать существующие ext4-подключения без изменения
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --json
+      - --mountpoint
+      - "/srv/dev-disk-by-uuid-{{ filesystem.uuid }}"
+      - --output
+      - TARGET,SOURCE,FSTYPE,UUID
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_items }}"
+  register: physical_preserved_ext4_mounts
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Требовать точное монтирование сохранённого ext4
+  ansible.builtin.assert:
+    that:
+      - mounts | length == 1
+      - mounts[0].target == '/srv/dev-disk-by-uuid-' ~ filesystem.uuid
+      - mounts[0].fstype == 'ext4'
+      - mounts[0].uuid == filesystem.uuid
+      - mounts[0].source is match('^/dev/')
+    fail_msg: Существующий ext4 не смонтирован как подтверждённый NAS-том
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+    mounts: "{{ (item.stdout | from_json).filesystems | default([]) }}"
+  loop: "{{ physical_preserved_ext4_mounts.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Разрешить действительный источник сохранённого ext4
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, "{{ mount.source }}"]
+  vars:
+    mount: "{{ (item.stdout | from_json).filesystems | first }}"
+  loop: "{{ physical_preserved_ext4_mounts.results }}"
+  register: physical_preserved_ext4_sources
+  changed_when: false
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Сверить смонтированный источник с разделом выбранного HDD
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == filesystem.path
+    fail_msg: ext4 смонтирован с другого физического диска
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.item.item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_sources.results }}"
+  loop_control:
+    label: "{{ item.item.item.role }}"
+
+- name: Сохранить только проверенную идентичность ext4 в текущем Ansible-запуске
+  ansible.builtin.set_fact:
+    physical_preserved_ext4: >-
+      {{ (physical_preserved_ext4 | default({})) | combine({
+          item.role: {
+            'filesystem_uuid': filesystem.uuid,
+            'mountpoint': '/srv/dev-disk-by-uuid-' ~ filesystem.uuid,
+            'device': filesystem.path
+          }
+         }) }}
+  vars:
+    disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    filesystem: >-
+      {{ (disk[0].children | first)
+         if (disk[0].children | default([], true) | length > 0)
+         else disk[0] }}
+  loop: "{{ physical_preserved_ext4_items }}"
+  loop_control:
+    label: "{{ item.role }}"
