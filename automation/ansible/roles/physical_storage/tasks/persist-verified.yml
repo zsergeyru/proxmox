@@ -190,8 +190,7 @@
 - name: Однократно сохранить подтверждённые UUID и GUID в постоянное состояние 910
   ansible.builtin.copy:
     dest: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
-    content: "{{ physical_storage_state_document | to_nice_json }}
-"
+    content: "{{ physical_storage_state_document | to_nice_json }}\n"
     mode: '0600'
     force: false
     follow: false
