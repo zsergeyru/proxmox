@@ -540,8 +540,78 @@ def test_client_scoped_urbackup_archival_policy() -> None:
                ["/usr/local/sbin/nas-urbackup-policy", "verify"]
                for task in tasks)
 
+def test_deploy_uses_ansible_for_urbackup_setup() -> None:
+    """Runtime executors can remain, but deployment must not call their setup modes."""
+    directory = ROOT / "automation/ansible/roles/nas/tasks"
+    server = yaml.safe_load((directory / "urbackup_server.yml").read_text())
+    client = yaml.safe_load((directory / "urbackup_client.yml").read_text())
+    assert any(task.get("ansible.builtin.include_tasks") == "urbackup-admin.yml" for task in server)
+    assert any(task.get("ansible.builtin.include_tasks") == "urbackup-verify-volumes.yml" for task in server)
+    assert any(task.get("ansible.builtin.include_tasks") == "urbackup-client-staging.yml" for task in client)
+    assert any(task.get("ansible.builtin.include_tasks") == "urbackup-verify-volumes.yml" for task in client)
+    all_tasks = str(server + client)
+    for forbidden in (
+        "[/usr/local/sbin/nas-urbackup-safe, preflight]",
+        "[/usr/local/sbin/nas-urbackup-safe, prepare]",
+        "[/usr/local/sbin/nas-urbackup-safe, init-admin]",
+        "[/usr/local/sbin/nas-urbackup-safe, status]",
+        "[/usr/local/sbin/nas-urbackup-client-mount, prepare]",
+    ):
+        assert forbidden not in all_tasks
+
+    verify = yaml.safe_load((directory / "urbackup-verify-volumes.yml").read_text())
+    assert "nas_data_guid" in str(verify) and "nas_backup_guid" in str(verify)
+    assert "findmnt" in str(verify) and "zpool" in str(verify)
+    assert "ONLINE" in str(verify)
+    assert "stat" in str(verify)
+    assert all("ansible.builtin.script" not in task for task in verify)
+    assert all("ansible.builtin.shell" not in task for task in verify)
+    for task in verify:
+        if "ansible.builtin.command" in task:
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[0] in {"zpool", "findmnt"}
+            assert task.get("changed_when") is False
+
+    admin = yaml.safe_load((directory / "urbackup-admin.yml").read_text())
+    assert "nas_admin_password_exists" in str(admin)
+    assert "nas_admin_initialized" in str(admin)
+    assert "force': False" in str(admin) or any(
+        item.get("ansible.builtin.copy", {}).get("force") is False for item in admin
+    )
+    assert any(task.get("ansible.builtin.command", {}).get("argv", [])[:3]
+               == ["openssl", "rand", "-base64"] for task in admin)
+    assert any(
+        "reset-admin-pw" in task.get("ansible.builtin.command", {}).get("argv", [])
+        and task.get("no_log") is True
+        and "not (nas_admin_initialized | bool)" == task.get("when")
+        for task in admin
+    )
+    assert not any("ansible.builtin.script" in task or "ansible.builtin.shell" in task for task in admin)
+    for task in admin:
+        if "ansible.builtin.slurp" in task:
+            assert task.get("no_log") is True
+        if "ansible.builtin.copy" in task:
+            assert task["ansible.builtin.copy"]["mode"] == "0600"
+            assert task["ansible.builtin.copy"]["force"] is False
+            assert task.get("no_log") is True
+
+    staging = yaml.safe_load((directory / "urbackup-client-staging.yml").read_text())
+    assert "/run/nas-urbackup-source" in str(staging)
+    assert "nas_urbackup_staging_contents.matched" in str(staging)
+    for task in staging:
+        assert "ansible.builtin.script" not in task
+        assert "ansible.builtin.shell" not in task
+        if "ansible.builtin.command" in task:
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[0] in {"findmnt", "mount"}
+            if argv[0] == "mount":
+                assert argv[1] in {"--bind", "--make-rshared"}
+                assert task.get("when")
+
+
 def main() -> int:
     test_backup_policy()
+    test_deploy_uses_ansible_for_urbackup_setup()
     test_client_scoped_urbackup_archival_policy()
     test_volume_contract()
     test_live_guard_is_read_only()
