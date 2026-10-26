@@ -1,0 +1,27 @@
+---
+# SAFE execution fixture: checks only variable precedence and assertions.
+# No disk/OMV roles, no mount, no command module, no files written.
+- name: Проверить отделение одобренного плана от режима восстановления
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Проверить входной extra-vars план первой подготовки
+      ansible.builtin.assert:
+        that:
+          - physical_disk_intent is mapping
+          - physical_disk_intent.mode == 'first-create'
+          - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
+          - physical_disk_intent['items'] | length == 3
+          - physical_recovery_intent is not defined
+
+    - name: Вычислить внутренний режим восстановления независимо от extra-vars
+      ansible.builtin.set_fact:
+        physical_recovery_intent: "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
+
+    - name: Проверить неизменность исходного подтверждения и внутренний recover
+      ansible.builtin.assert:
+        that:
+          - physical_disk_intent.mode == 'first-create'
+          - physical_recovery_intent.mode == 'recover'
+          - physical_recovery_intent.fingerprint == physical_disk_intent.fingerprint
+          - physical_recovery_intent['items'] == physical_disk_intent['items']
