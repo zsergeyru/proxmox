@@ -147,6 +147,20 @@ def test_cli() -> None:
     ):
         assert parser.parse_args(argv).command == command
 
+    # Inspect and disk planning are mandatory internal phases of deploy,
+    # not separately callable infra-manager commands.
+    for legacy in ("inspect", "storage-plan", "storage-prepare"):
+        try:
+            parser.parse_args([legacy, "nas"])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("Standalone command reintroduced: " + legacy)
+    for step in ("plan", "prepare"):
+        args = parser.parse_args(["deploy", "nas", "--_physical_stage", step])
+        assert args.command == "deploy"
+        assert args._physical_stage == step
+
 
 def main() -> int:
     """Выполнить безопасные автономные проверки."""
