@@ -138,7 +138,6 @@ def test_cli() -> None:
 
     parser = build_parser()
     for argv, command in (
-        (["hosts"], "hosts"),
         (["deploy", "nas", "--_physical_stage", "plan"], "deploy"),
         (["status", "nas"], "status"),
         (["deploy", "nas"], "deploy"),
@@ -149,7 +148,7 @@ def test_cli() -> None:
 
     # Inspect and disk planning are mandatory internal phases of deploy,
     # not separately callable infra-manager commands.
-    for legacy in ("inspect", "storage-plan", "storage-prepare"):
+    for legacy in ("hosts", "inspect", "storage-plan", "storage-prepare"):
         try:
             parser.parse_args([legacy, "nas"])
         except SystemExit as exc:
