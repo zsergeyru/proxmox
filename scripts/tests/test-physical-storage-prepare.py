@@ -82,7 +82,7 @@ def test_confirmation():
         if capture_output:
             return SimpleNamespace(
                 returncode=0, stderr="",
-                stdout="План пустых HDD\nNAS_STORAGE_PLAN_JSON="
+                stdout="План пустых HDD\nPHYSICAL_STORAGE_PLAN_JSON="
                 + json.dumps(output) + "\n",
             )
         return 0
@@ -136,7 +136,7 @@ def test_existing_shared_confirmation() -> None:
         if capture_output:
             return SimpleNamespace(
                 returncode=0, stderr="",
-                stdout="Plan\nNAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n",
+                stdout="Plan\nPHYSICAL_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n",
             )
         return 0
 
@@ -173,7 +173,7 @@ def test_missing_disk_state_blocks_approval() -> None:
         calls.append(command)
         if capture_output:
             return SimpleNamespace(returncode=0, stderr="",
-                stdout="NAS_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n")
+                stdout="PHYSICAL_STORAGE_PLAN_JSON=" + json.dumps(output) + "\n")
         return 0
 
     with (
@@ -690,7 +690,7 @@ def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
         calls.append((cmd, input_text))
         if capture_output:
             return SimpleNamespace(
-                returncode=0, stdout="NAS_STORAGE_PLAN_JSON=" + json.dumps(response),
+                returncode=0, stdout="PHYSICAL_STORAGE_PLAN_JSON=" + json.dumps(response),
             )
         return 0
 
