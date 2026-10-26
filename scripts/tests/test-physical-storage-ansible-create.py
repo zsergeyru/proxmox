@@ -238,7 +238,10 @@ def test_omv_native_registration_is_safe_and_disconnected() -> None:
                 continue
             doc = path.read_text(encoding="utf-8")
             assert "tasks_from: prepare-omv-register.yml" not in doc, path
-            assert "include_tasks: prepare-omv-register.yml" not in doc, path
+            if path.name == "prepare-recover-complete.yml":
+                assert "include_tasks: prepare-omv-register.yml" in doc
+            else:
+                assert "include_tasks: prepare-omv-register.yml" not in doc, path
 
 
 def test_omv_post_registration_verification_is_read_only() -> None:
@@ -343,7 +346,7 @@ def test_observed_identity_includes_system_disk_without_writes() -> None:
 
 
 def test_generic_observed_state_persistence_is_one_shot() -> None:
-    """No state overwrite, no symlinks, no disk writes and no NAS code in 910."""
+    """No state overwrite, only trusted 910 symlink, no NAS code in 910."""
     path = ROLE / "persist-verified.yml"
     tasks = read("persist-verified.yml")
     source = path.read_text(encoding="utf-8")
@@ -377,15 +380,66 @@ def test_generic_observed_state_persistence_is_one_shot() -> None:
         assert modules[0] in {
             "ansible.builtin.assert", "ansible.builtin.stat",
             "ansible.builtin.slurp", "ansible.builtin.set_fact",
-            "ansible.builtin.copy",
+            "ansible.builtin.copy", "ansible.builtin.command",
         }, task.get("name")
+        if modules[0] == "ansible.builtin.command":
+            assert task["ansible.builtin.command"]["argv"] == [
+                "readlink", "--canonicalize-existing",
+                "/var/lib/infra-manager/physical-hosts",
+            ]
+            assert task["changed_when"] is False
+            assert task["delegate_to"] == "localhost"
     for candidate in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
         assert "persist-verified.yml" not in candidate.read_text(), candidate
     for candidate in (ROOT / "automation/ansible/roles").rglob("*.yml"):
         if candidate == path:
             continue
-        assert "tasks_from: persist-verified.yml" not in candidate.read_text(), candidate
-        assert "include_tasks: persist-verified.yml" not in candidate.read_text(), candidate
+        source = candidate.read_text()
+        if candidate.name == "prepare-recover-complete.yml":
+            assert "tasks_from: persist-verified.yml" in source
+        else:
+            assert "tasks_from: persist-verified.yml" not in source, candidate
+        assert "include_tasks: persist-verified.yml" not in source, candidate
+    assert "'/mnt/persistent-state/physical-hosts'" in source_of_role(path)
+    assert "physical_state_real_directory.stat.mode in ['0700', '0750']" in source_of_role(path)
+
+
+def source_of_role(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def test_disabled_recovery_transaction_has_strict_order() -> None:
+    """Staged coordinator must be unreachable and check hardware first."""
+    path = ROOT / "automation/ansible/roles/nas/tasks/prepare-recover-complete.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(tasks, list) and len(tasks) == 8
+    gate = tasks[0]["ansible.builtin.assert"]["that"]
+    assert any("nas_omv_registration_authorized" in item for item in gate)
+    assert any("physical_storage_state_commit_authorized" in item for item in gate)
+    assert any("physical_disk_intent.mode == 'recover'" in item for item in gate)
+    sequence = []
+    for task in tasks[1:-1]:
+        if "ansible.builtin.include_role" in task:
+            arg = task["ansible.builtin.include_role"]
+            sequence.append((arg["name"], arg["tasks_from"]))
+        else:
+            sequence.append(("nas", task["ansible.builtin.include_tasks"]))
+    assert sequence == [
+        ("physical_storage", "prepare-recover-inspect.yml"),
+        ("nas", "prepare-omv-audit.yml"),
+        ("nas", "prepare-omv-register.yml"),
+        ("nas", "prepare-omv-activate.yml"),
+        ("nas", "prepare-observed-identity.yml"),
+        ("physical_storage", "persist-verified.yml"),
+    ]
+    assert "ansible.builtin.debug" in tasks[-1]
+    for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
+        assert "prepare-recover-complete.yml" not in playbook.read_text(), playbook
+    for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
+        if role == path:
+            continue
+        assert "prepare-recover-complete.yml" not in role.read_text(), role
+
 
 
 def read_omv_register() -> list:
@@ -421,4 +475,5 @@ if __name__ == "__main__":
     test_omv_fstab_stage_guards_existing_data()
     test_observed_identity_includes_system_disk_without_writes()
     test_generic_observed_state_persistence_is_one_shot()
+    test_disabled_recovery_transaction_has_strict_order()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
