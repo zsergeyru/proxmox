@@ -2,12 +2,8 @@
 # Идентификаторы заполняются только после фактической сверки на сервере.
 schema_version: 1
 host: nas
-# Recreate only the three non-system HDDs, and ONLY after showing their
-# verified serials on PVE and receiving explicit operator approval.
-# Once confirmed UUID/GUID are persisted, subsequent deploys preserve them.
-initialization:
-  recreate_once: [shared, data, backup]
-  require_exact_device_confirmation: true
+# Existing disks are adopted and checked; deploy never creates or wipes HDDs.
+# Any incomplete/foreign layout fails closed until investigated outside deploy.
 devices:
   - id: system
     role: system
