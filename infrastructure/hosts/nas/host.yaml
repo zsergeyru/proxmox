@@ -6,7 +6,7 @@ system:
   distribution: debian
   version: "13"
 management:
-  driver: omv8
+  engine: ansible
 connection:
   address: 192.168.1.12
   port: 22
