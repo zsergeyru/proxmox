@@ -28,17 +28,7 @@ def module(file: str, alias: str):
     return result
 
 
-shares = module("nas-omv-shares.py", "nas_omv_shares_test")
-DECLARED_SHARES = yaml.safe_load(
-    (ROOT / "infrastructure/hosts/nas/provision.yaml").read_text()
-)["shares"]
 backup = module("nas-zfs-backup.py", "nas_zfs_backup_test")
-ACCESS = yaml.safe_load(
-    (ROOT / "infrastructure/hosts/nas/access.yaml").read_text()
-)
-ACCESS_POLICY = {"mode": ACCESS["mode"], "shares": ACCESS["shares"]}
-
-
 def refusal(callback, error_type: type[Exception]) -> None:
     """Убедиться, что конфликт не изменяет чужие настройки."""
 
@@ -49,178 +39,24 @@ def refusal(callback, error_type: type[Exception]) -> None:
     raise AssertionError("Опасная конфигурация была принята")
 
 
-def test_shares() -> None:
-    """Only explicitly declared authenticated named-user shares can be published."""
-    plan = shares.validated_folders(DECLARED_SHARES)
-    assert len(plan) == 4
-    refusal(lambda: shares.validated_folders([
-        {"name": "../etc", "volume": "data", "directory": "etc"}
-    ]), shares.ShareError)
-    refusal(lambda: shares.validated_folders([
-        {"name": "x", "volume": "backup", "directory": "x"}
-    ]), shares.ShareError)
-    refusal(lambda: shares.validated_folders([
-        {"name": "x", "volume": "data", "directory": "x"}
-    ] * 2), shares.ShareError)
-    for invalid in (
-        {"mode": "guest_only", "shares": ACCESS_POLICY["shares"]},
-        {"mode": "named_users", "shares": {"shared": {"access": "read_write"}}},
-        {"mode": "named_users", "shares": {
-            **ACCESS_POLICY["shares"], "backup": {"access": "read_write"}
-        }},
-        {"mode": "named_users", "shares": {
-            **ACCESS_POLICY["shares"], "shared": {"access": "read_only"}
-        }},
-    ):
-        refusal(lambda invalid=invalid: shares.validated_access(invalid, plan), shares.ShareError)
-    folders, smb = shares.plan_shares(
-        "shared-ref", "data-ref", [], [], plan, ACCESS_POLICY,
+def test_omv_shares_are_declared_in_ansible() -> None:
+    """Old Python OMV writer is retired, access comes from YAML and Ansible."""
+    folder = ROOT / "automation/ansible/roles/nas"
+    assert not (folder / "files/nas-omv-shares.py").exists()
+    smb = yaml.safe_load((folder / "tasks/smb.yml").read_text(encoding="utf-8"))
+    omv = yaml.safe_load(
+        (folder / "tasks/omv-shares.yml").read_text(encoding="utf-8")
     )
-    assert len(folders) == 4 and len(smb) == 4
-    assert {folder["name"] for folder in folders} == {
-        "shared", "movies", "music", "data"
-    }
-    assert all(item["guest"] == "no" and item["readonly"] is False for item in smb)
-    assert all(item["enable"] is True for item in smb)
-    foreign = [{
-        "uuid": "existing-uuid", "name": "shared",
-        "mntentref": "wrong", "reldirpath": "shared/",
-    }]
-    refusal(
-        lambda: shares.plan_shares(
-            "shared-ref", "data-ref", foreign, [], plan, ACCESS_POLICY,
-        ), shares.ShareError,
-    )
-    correct = [{
-        "uuid": "00000000-0000-4000-8000-000000000001",
-        "name": "shared", "mntentref": "shared-ref", "reldirpath": "shared/",
-    }]
-    old = [{
-        "uuid": "00000000-0000-4000-9000-000000000001",
-        "sharedfolderref": correct[0]["uuid"],
-        "guest": "only", "readonly": True, "enable": False,
-        "comment": "preserve",
-    }]
-    _folders, desired = shares.plan_shares(
-        "shared-ref", "data-ref", correct, old, plan, ACCESS_POLICY,
-    )
-    adjusted = next(x for x in desired if x.get("uuid") == old[0]["uuid"])
-    assert adjusted["guest"] == "no"
-    assert adjusted["readonly"] is False
-    assert adjusted["enable"] is True
-    assert adjusted["comment"] == "preserve"
-
-
-def test_omv_shared_folders_use_real_database_uuids() -> None:
-    """OMV выдаёт UUID новых папок; SMB-ссылки используют только эти UUID."""
-
-    folders: list[dict[str, object]] = []
-    resources: list[dict[str, object]] = []
-    settings: dict[str, object] = {"enable": False, "shares": {"share": []}}
-    updates: list[tuple[str, dict[str, object]]] = []
-    salt_deploys: list[int] = []
-
-    def fake_command(*args: str) -> str:
-        assert args[0] in ("omv-confdbadm", "omv-salt")
-        if args[0] == "omv-salt":
-            assert args == ("omv-salt", "deploy", "run", "samba")
-            salt_deploys.append(1)
-            return ""
-        operation, model = args[1:3]
-        if operation == "read":
-            if model == "conf.service.smb":
-                settings["shares"] = {"share": list(resources)}
-            data = {
-                "conf.system.sharedfolder": folders,
-                "conf.service.smb.share": resources,
-                "conf.service.smb": settings,
-            }[model]
-            return json.dumps(data)
-        assert operation == "update"
-        payload = json.loads(args[3])
-        updates.append((model, payload))
-        if model == "conf.system.sharedfolder":
-            assert "uuid" not in payload
-            assert payload["privileges"] == {"privilege": []}
-            record = {**payload, "uuid": f"00000000-0000-4000-8000-{len(folders)+1:012x}"}
-            folders.append(record)
-        elif model == "conf.service.smb.share":
-            assert payload["sharedfolderref"] in {item["uuid"] for item in folders}
-            assert payload["guest"] == "no" and payload["readonly"] is False
-            if "uuid" in payload:
-                match = [item for item in resources if item["uuid"] == payload["uuid"]]
-                assert len(match) == 1
-                match[0].update(payload)
-            else:
-                resources.append({
-                    **payload,
-                    "uuid": f"00000000-0000-4000-9000-{len(resources)+1:012x}",
-                })
-        else:
-            assert model == "conf.service.smb"
-            resources[:] = list(payload.get("shares", {}).get("share", []))
-            settings.clear()
-            settings.update(payload)
-        return ""
-
-    with (
-        patch.object(shares, "command", side_effect=fake_command),
-        patch.object(shares.Path, "is_mount", return_value=True),
-        patch.object(shares.Path, "is_dir", return_value=True),
-        patch.object(shares.Path, "is_symlink", return_value=False),
-    ):
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, ACCESS_POLICY)
-        assert len(folders) == 4 and len(resources) == 4
-        assert len(salt_deploys) == 1
-        assert settings["enable"] is True
-        assert [entry["name"] for entry in folders] == [
-            "shared", "movies", "music", "data",
-        ]
-        assert {entry["sharedfolderref"] for entry in resources} == {
-            entry["uuid"] for entry in folders
-        }
-        # Converge a pre-existing authenticated share without removing its UUID.
-        resources[0]["guest"] = "only"
-        resources[0]["readonly"] = True
-        original_uuid = resources[0]["uuid"]
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, ACCESS_POLICY)
-        assert resources[0]["uuid"] == original_uuid
-        assert resources[0]["guest"] == "no" and resources[0]["readonly"] is False
-        assert len(salt_deploys) == 2
-        writes = len(updates)
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, ACCESS_POLICY)
-        assert len(updates) == writes
-        assert len(salt_deploys) == 2
-        # Частично записанное состояние при повторе не создаёт чужие записи.
-        resources.pop()
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, ACCESS_POLICY)
-        assert len(resources) == 4
-        assert len(salt_deploys) == 3
-        # Включение Samba не стирает уже зарегистрированные SMB-ресурсы.
-        settings["enable"] = False
-        shares.apply("shared-ref", "data-ref", "/mnt/shared", "/mnt/data", DECLARED_SHARES, ACCESS_POLICY)
-        assert len(resources) == 4
-        assert len(salt_deploys) == 4
-
-
-def test_omv_cli_failure_never_exposes_stderr() -> None:
-    """Код ошибки содержит лишь этап и числовой rc, не содержимое OMV."""
-
-    from types import SimpleNamespace
-
-    result = SimpleNamespace(
-        returncode=1, stdout="", stderr="SECRET_SHOULD_NOT_APPEAR"
-    )
-    with patch.object(shares.subprocess, "run", return_value=result):
-        try:
-            shares.command(
-                "omv-confdbadm", "update", "conf.system.sharedfolder", "{}"
-            )
-        except shares.ShareError as exc:
-            assert "NAS_SMB_STEP=create-folder RC=1" == str(exc)
-            assert "SECRET_SHOULD_NOT_APPEAR" not in str(exc)
-        else:
-            raise AssertionError("OMV command failure was silently accepted")
+    assert any(task.get("ansible.builtin.include_tasks") == "omv-shares.yml"
+               for task in smb)
+    assert all("ansible.builtin.script" not in task for task in omv)
+    assert "nas_provision.shares" in str(omv)
+    assert "nas_access_policy" in str(smb)
+    assert "mntentref" in str(omv)
+    assert "omv-confdbadm" in str(omv)
+    assert "omv-salt" in str(omv)
+    assert "readonly': false" in str(omv)
+    assert "guest': 'no'" in str(omv)
 
 
 def test_backup_identifiers() -> None:
@@ -379,9 +215,7 @@ def test_samba_safe_error_hints() -> None:
 def main() -> int:
     """Проверить работу без реальных файлов пользователей."""
 
-    test_shares()
-    test_omv_shared_folders_use_real_database_uuids()
-    test_omv_cli_failure_never_exposes_stderr()
+    test_omv_shares_are_declared_in_ansible()
     test_samba_service_automation()
     test_samba_safe_error_hints()
     test_backup_identifiers()
