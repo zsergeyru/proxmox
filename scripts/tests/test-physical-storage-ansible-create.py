@@ -64,6 +64,11 @@ def test_adopt_ext4_can_mount_only_after_verified_omv_fstab() -> None:
         index("Зарегистрировать только доказанные существующие ФС в OMV"))
     assert index("Не принимать чужой mount или перенос ext4 в другой каталог") < (
         index("Зарегистрировать только доказанные существующие ФС в OMV"))
+    assert index("Проверить исходный каталог ext4 до любых операций OMV") < (
+        index("Зарегистрировать только доказанные существующие ФС в OMV"))
+    assert index("Запретить генерацию fstab поверх файлов в каталоге ext4") < (
+        index("Зарегистрировать только доказанные существующие ФС в OMV"))
+    assert "nas_adopt_shared_target_initial_contents.matched" in str(tasks)
     assert index("Зарегистрировать только доказанные существующие ФС в OMV") < (
         index("Подключить только уже существующий ext4 через запись OMV fstab"))
     assert index("Не накрывать чужие файлы при подключении существующего ext4") < (
