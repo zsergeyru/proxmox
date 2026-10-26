@@ -78,8 +78,12 @@ def test_write_stage_is_gated_and_not_connected() -> None:
         assert "tasks_from: prepare-journal.yml" not in source, p
     for p in (ROOT / "automation/ansible/roles/nas/tasks").glob("*.yml"):
         source = p.read_text(encoding="utf-8")
-        assert "tasks_from: prepare-write.yml" not in source, p
-        assert "tasks_from: prepare-journal.yml" not in source, p
+        if p.name == "prepare-create-complete.yml":
+            assert "tasks_from: prepare-write.yml" in source
+            assert "tasks_from: prepare-journal.yml" in source
+        else:
+            assert "tasks_from: prepare-write.yml" not in source, p
+            assert "tasks_from: prepare-journal.yml" not in source, p
 
 
 def test_preserved_ext4_is_checked_without_writes() -> None:
@@ -438,8 +442,48 @@ def test_disabled_recovery_transaction_has_strict_order() -> None:
     for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
         if role == path:
             continue
-        assert "prepare-recover-complete.yml" not in role.read_text(), role
+        source = role.read_text()
+        if role.name == "prepare-create-complete.yml":
+            assert "include_tasks: prepare-recover-complete.yml" in source
+        else:
+            assert "prepare-recover-complete.yml" not in source, role
 
+
+
+def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
+    """Never retry mkfs: journal must precede the one-shot disk writer."""
+    path = ROOT / "automation/ansible/roles/nas/tasks/prepare-create-complete.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert len(tasks) == 7
+    guard = tasks[0]["ansible.builtin.assert"]["that"]
+    assert any("nas_first_create_authorized" in item for item in guard)
+    assert any("nas_omv_registration_authorized" in item for item in guard)
+    assert any("physical_storage_state_commit_authorized" in item for item in guard)
+    assert any("physical_disk_intent.mode == 'first-create'" in item for item in guard)
+    assert any("physical_disk_intent.fingerprint" in item for item in guard)
+    steps = [
+        step["ansible.builtin.include_role"]["tasks_from"]
+        if "ansible.builtin.include_role" in step
+        else step.get("ansible.builtin.include_tasks")
+        for step in tasks[1:-1]
+        if "ansible.builtin.set_fact" not in step
+    ]
+    assert steps == [
+        "prepare-preflight.yml",
+        "prepare-journal.yml",
+        "prepare-write.yml",
+        "prepare-recover-complete.yml",
+    ]
+    assert tasks[4]["ansible.builtin.set_fact"]["physical_disk_intent"] == (
+        "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
+    )
+    assert "ansible.builtin.debug" in tasks[-1]
+    for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
+        assert "prepare-create-complete.yml" not in playbook.read_text(), playbook
+    for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
+        if role == path:
+            continue
+        assert "prepare-create-complete.yml" not in role.read_text(), role
 
 
 def read_omv_register() -> list:
@@ -476,4 +520,5 @@ if __name__ == "__main__":
     test_observed_identity_includes_system_disk_without_writes()
     test_generic_observed_state_persistence_is_one_shot()
     test_disabled_recovery_transaction_has_strict_order()
+    test_disabled_first_create_is_journal_first_and_unreachable()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
