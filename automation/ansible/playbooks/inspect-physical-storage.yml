@@ -1,0 +1,16 @@
+---
+# Reusable read-only host inspection, no NAS/OMV/Python deployment driver.
+- name: Обследовать физические диски без записи
+  hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    physical_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/' ~ physical_host_name ~ '/storage.yaml')
+         | from_yaml }}
+  tasks:
+    - name: Независимая проверка физических HDD
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: inspect.yml

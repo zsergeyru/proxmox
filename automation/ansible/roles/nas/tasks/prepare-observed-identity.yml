@@ -1,0 +1,97 @@
+---
+# Read-only preparation of controller-compatible observed identity.
+# Requires independent journal, disk, mount and OMV checks from the same play.
+# The generic controller-state writer will be a separate guarded iteration.
+- name: Проверить полный и окончательно подтверждённый результат OMV
+  ansible.builtin.assert:
+    that:
+      - physical_host_name == 'nas'
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
+      - nas_omv_verified_volumes is mapping
+      - nas_omv_verified_volumes.keys() | list | sort == ['backup', 'data', 'shared']
+      - physical_recovery_disks is sequence
+      - physical_storage.devices | length == 4
+      - physical_storage.devices | map(attribute='role') | list | sort == ['backup', 'data', 'shared', 'system']
+    fail_msg: Нельзя построить состояние контроллера из неподтверждённых томов
+
+- name: Найти физический SSD, действительно содержащий корень системы
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - -r
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/")) | .serial] | if length == 1 then .[0] else empty end'
+    stdin: "{{ physical_recovery_disk_tree.stdout }}"
+    stdin_add_newline: false
+  register: physical_observed_system_serial
+  changed_when: false
+
+- name: Подтвердить непустой идентификатор системного SSD
+  ansible.builtin.assert:
+    that:
+      - physical_observed_system_serial.stdout | trim is match('^[A-Za-z0-9._:-]{1,128}$')
+      - physical_observed_system_serial.stdout | trim not in (physical_recovery_intent['items'] | map(attribute='serial') | list)
+    fail_msg: Системный SSD не имеет уникальной подтверждённой идентичности
+
+- name: Проверить все четыре роли по текущим серийным номерам и ёмкости
+  ansible.builtin.assert:
+    that:
+      - matches | length == 1
+      - matches[0].model is string
+      - item.model | lower in matches[0].model | lower
+      - matches[0].size | int >= (item.capacity_gb | int) * 950000000
+      - matches[0].size | int <= (item.capacity_gb | int) * 1050000000
+      - item.serial is none or item.serial == observed_serial
+    fail_msg: HDD/SSD {{ item.role }} не соответствует подтверждённой декларации
+  vars:
+    assigned: >-
+      {{ physical_recovery_intent['items']
+         | selectattr('role', 'equalto', item.role) | list }}
+    observed_serial: >-
+      {{ (physical_observed_system_serial.stdout | trim)
+         if item.role == 'system' else assigned[0].serial }}
+    matches: >-
+      {{ physical_recovery_disks | selectattr('serial', 'equalto', observed_serial) | list }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Собрать список подтверждённых дисков с прежней структурой storage.yaml
+  ansible.builtin.set_fact:
+    physical_observed_devices: >-
+      {{ (physical_observed_devices | default([])) +
+         [item | combine({'serial': observed_serial})] }}
+  vars:
+    assigned: >-
+      {{ physical_recovery_intent['items']
+         | selectattr('role', 'equalto', item.role) | list }}
+    observed_serial: >-
+      {{ (physical_observed_system_serial.stdout | trim)
+         if item.role == 'system' else assigned[0].serial }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Окончательно проверить уникальность наблюдаемых HDD/SSD
+  ansible.builtin.assert:
+    that:
+      - physical_observed_devices | length == 4
+      - physical_observed_devices | map(attribute='role') | list | sort == ['backup', 'data', 'shared', 'system']
+      - physical_observed_devices | map(attribute='serial') | unique | list | length == 4
+      - physical_observed_devices | map(attribute='serial') | select('match', '^[A-Za-z0-9._:-]{1,128}$') | list | length == 4
+      - nas_omv_verified_volumes.data.pool_guid != nas_omv_verified_volumes.backup.pool_guid
+      - nas_omv_verified_volumes.shared.filesystem_uuid is match('^[a-fA-F0-9-]{16,40}$')
+    fail_msg: Наблюдаемое состояние физических дисков содержит конфликт
+
+- name: Сформировать только проверенные факты для будущего сохранения в 910
+  ansible.builtin.set_fact:
+    physical_observed_storage:
+      devices: "{{ physical_observed_devices }}"
+      volumes: "{{ nas_omv_verified_volumes }}"
+      plan_fingerprint: "{{ physical_recovery_intent.fingerprint }}"
+
+- name: Не изменять хранилище контроллера при подготовке наблюдаемых данных
+  ansible.builtin.debug:
+    msg: Подготовлены 4 идентичности HDD/SSD и 3 проверенных тома, запись в 910 не производилась

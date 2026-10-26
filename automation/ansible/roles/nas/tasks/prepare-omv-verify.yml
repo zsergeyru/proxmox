@@ -1,0 +1,98 @@
+---
+# READ-ONLY end-of-recovery proof, staged separately from the writer.
+# Produces facts for a future durable 910 state commit; never creates or
+# replaces filesystems, OMV entries, mounts, or a controller state file.
+- name: Требовать подтверждённые ext4/ZFS и три UUID из OMV
+  ansible.builtin.assert:
+    that:
+      - physical_host_name == 'nas'
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
+      - physical_recovery_ext4.results | length == 1
+      - physical_recovery_guids.results | length == 2
+      - nas_omv_registered is mapping
+      - nas_omv_registered.keys() | list | sort == ['backup', 'data', 'shared']
+      - nas_omv_registered.values() | list | unique | length == 3
+      - nas_omv_expected_mounts | length == 3
+    fail_msg: Нет подтверждённых UUID OMV после регистрации
+
+- name: Прочитать реальные точки подключения после настройки OMV
+  ansible.builtin.command:
+    argv: [findmnt, --json, --mountpoint, "{{ item.dir }}", --output, TARGET,SOURCE,FSTYPE,UUID]
+  loop: "{{ nas_omv_expected_mounts }}"
+  loop_control:
+    label: "{{ item.role }}"
+  register: nas_omv_verified_mounts
+  changed_when: false
+
+- name: Убедиться, что каждая ФС смонтирована в правильном каталоге
+  ansible.builtin.assert:
+    that:
+      - rows | length == 1
+      - rows[0].target == item.item.dir
+      - rows[0].fstype == item.item.type
+      - >-
+        (item.item.type == 'ext4' and rows[0].uuid == physical_recovery_ext4.results[0].stdout | trim)
+        or (item.item.type == 'zfs' and rows[0].source.split('/')[0] == item.item.fsname)
+    fail_msg: Подтверждённый том {{ item.item.role }} не смонтирован с правильным источником
+  vars:
+    rows: "{{ (item.stdout | from_json).filesystems | default([]) }}"
+  loop: "{{ nas_omv_verified_mounts.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Повторно проверить настоящие GUID ZFS после OMV
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: nas_omv_verified_guids
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Запретить подмену ZFS после регистрации OMV
+  ansible.builtin.assert:
+    that:
+      - original | length == 1
+      - item.stdout | trim == original[0].stdout | trim
+    fail_msg: GUID ZFS изменился после независимой проверки
+  vars:
+    original: "{{ physical_recovery_guids.results | selectattr('item.role', 'equalto', item.item.id) | list }}"
+  loop: "{{ nas_omv_verified_guids.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Собрать доверенную идентичность ext4 из реальных данных, без записи
+  ansible.builtin.set_fact:
+    nas_omv_verified_volumes:
+      shared:
+        mountpoint: "{{ nas_omv_expected_mounts[0].dir }}"
+        filesystem_uuid: "{{ physical_recovery_ext4.results[0].stdout | trim }}"
+        omv_reference: "{{ nas_omv_registered.shared }}"
+
+- name: Дополнить подтверждёнными GUID ZFS и UUID OMV
+  ansible.builtin.set_fact:
+    nas_omv_verified_volumes: >-
+      {{ nas_omv_verified_volumes | combine({
+          item.item.id: {
+            'mountpoint': '/' ~ item.item.pool,
+            'pool': item.item.pool,
+            'pool_guid': (item.stdout | trim),
+            'omv_reference': nas_omv_registered[item.item.id]
+          }
+        }) }}
+  loop: "{{ nas_omv_verified_guids.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Проверить полноту наблюдаемого состояния перед будущей записью в 910
+  ansible.builtin.assert:
+    that:
+      - nas_omv_verified_volumes.keys() | list | sort == ['backup', 'data', 'shared']
+      - nas_omv_verified_volumes.shared.filesystem_uuid is match('^[a-fA-F0-9-]{16,40}$')
+      - nas_omv_verified_volumes.data.pool_guid is match('^[0-9]{1,20}$')
+      - nas_omv_verified_volumes.backup.pool_guid is match('^[0-9]{1,20}$')
+      - nas_omv_verified_volumes.data.pool == 'nas-data'
+      - nas_omv_verified_volumes.backup.pool == 'nas-backup'
+    fail_msg: Итоговый реестр ext4/ZFS неполон, сохранять состояние в 910 нельзя

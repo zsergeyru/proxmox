@@ -255,6 +255,41 @@ def prepare_blank_disks(repo_root: Path, host: PhysicalHost,
             ]
         ),
     }
+    if pending is not None and all(
+        item["action"] in {"create-ext4", "create-zfs"}
+        for item in payload["items"]
+    ):
+        # Native Ansible validates an interrupted *three-disk* creation
+        # independently before the legacy OMV-only recovery. The special
+        # case with preserved ext4 keeps the existing proven recovery path.
+        # This operation contains NO disk write and cannot invoke a writer.
+        from .physical_host_ansible import run_physical_ansible
+        run_physical_ansible(
+            repo_root, session, operation="recover-inspect",
+            variables={"physical_disk_intent": {
+                "schema_version": 1,
+                "host": host.name,
+                "mode": "recover",
+                "fingerprint": confirmed,
+                "items": payload["items"],
+            }},
+        )
+    if pending is None:
+        # An independent native Ansible read-only preflight comes AFTER the
+        # base packages are installed and BEFORE the historical disk writer.
+        # It cannot format a disk; the old writer still independently checks
+        # the same approved plan and its own persistent journal.
+        from .physical_host_ansible import run_physical_ansible
+        run_physical_ansible(
+            repo_root, session, operation="prepare-preflight",
+            variables={"physical_disk_intent": {
+                "schema_version": 1,
+                "host": host.name,
+                "mode": "first-create",
+                "fingerprint": confirmed,
+                "items": payload["items"],
+            }},
+        )
     result = run(
         session.command(
             "python3 /usr/local/sbin/nas-storage-prepare"

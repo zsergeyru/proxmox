@@ -1,0 +1,54 @@
+---
+# Staged transaction coordinator, intentionally unreachable from public CLI
+# and production Ansible playbooks. Never format disks in this role.
+- name: Разрешить только проверенное восстановление по прежнему подтверждению
+  ansible.builtin.assert:
+    that:
+      - physical_host_name == 'nas'
+      - physical_storage.host == 'nas'
+      - physical_disk_intent is mapping
+      - physical_recovery_intent is mapping
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_intent.host == physical_disk_intent.host
+      - physical_recovery_intent.host == 'nas'
+      - physical_recovery_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_recovery_intent.fingerprint == physical_disk_intent.fingerprint
+      - physical_recovery_intent['items'] == physical_disk_intent['items']
+      - >-
+        physical_disk_intent.mode == 'recover' or
+        (
+          physical_disk_intent.mode == 'first-create'
+          and physical_preparation_journal_committed | default(false) | bool
+        )
+      - nas_omv_registration_authorized | default(false) | bool
+      - physical_storage_state_commit_authorized | default(false) | bool
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Нет подтверждённого восстановления; изменение OMV и 910 запрещено
+
+- name: Сверить прежний журнал и идентичность созданных ext4/ZFS
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: prepare-recover-inspect.yml
+
+- name: Отказать при конфликтах файловых систем OMV
+  ansible.builtin.include_tasks: prepare-omv-audit.yml
+
+- name: Зарегистрировать только отсутствующие проверенные ФС в OMV
+  ansible.builtin.include_tasks: prepare-omv-register.yml
+
+- name: Применить безопасное монтирование и перепроверить UUID/GUID
+  ansible.builtin.include_tasks: prepare-omv-activate.yml
+
+- name: Собрать реальные идентификаторы SSD/HDD и проверенных томов
+  ansible.builtin.include_tasks: prepare-observed-identity.yml
+
+- name: Однократно сохранить проверенные назначения в постоянном состоянии 910
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: persist-verified.yml
+
+- name: Завершить после независимого подтверждения состояния в 910
+  ansible.builtin.debug:
+    msg: HDD и OMV проверены, постоянная идентичность томов подтверждена

@@ -1,0 +1,67 @@
+---
+# Syntax-only fixture for CI. NEVER execute this playbook: it imports the
+# isolated disk writer and one-shot controller-state commit for validation.
+# No production ansible-playbook entrypoint references this file.
+- name: Проверить синтаксис изолированных ролей без исполнения
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Проверить Ansible-предпроверку HDD
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: prepare-preflight.yml
+
+    - name: Проверить одноразовый журнал HDD
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: prepare-journal.yml
+
+    - name: Проверить синтаксис отключённой записи ext4/ZFS
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: prepare-write.yml
+
+    - name: Проверить сверку ранее созданных HDD
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: prepare-recover-inspect.yml
+
+    - name: Проверить наблюдаемое состояние контроллера
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: persist-verified.yml
+
+    - name: Проверить аудиторский этап OMV
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-omv-audit.yml
+
+    - name: Проверить создание объектов OMV
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-omv-register.yml
+
+    - name: Проверить применение fstab
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-omv-activate.yml
+
+    - name: Проверить финальную идентичность
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-omv-verify.yml
+
+    - name: Проверить список наблюдаемых дисков
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-observed-identity.yml
+
+    - name: Проверить порядок единого восстановления
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-recover-complete.yml
+
+    - name: Проверить порядок отключённого первого создания
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-create-complete.yml

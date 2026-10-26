@@ -1,0 +1,201 @@
+---
+# Recovery may only OBSERVE an interrupted journal and existing ext4/ZFS.
+# It may NEVER call the journal creator or the filesystem writer.
+- name: Требовать режим восстановления из подтверждённого прежнего плана
+  ansible.builtin.assert:
+    that:
+      - physical_recovery_intent is defined
+      - physical_recovery_intent is mapping
+      - physical_recovery_intent.keys() | list | sort == ['fingerprint', 'host', 'items', 'mode', 'schema_version']
+      - physical_recovery_intent.schema_version == 1
+      - physical_recovery_intent.host == physical_host_name
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_recovery_intent['items'] | length == 3
+      - physical_recovery_intent['items'] | map(attribute='role') | list | sort == ['backup', 'data', 'shared']
+      - physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
+      - physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
+      - physical_recovery_intent['items'] | map(attribute='serial') | unique | list | length == 3
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+    fail_msg: Нет однозначного подтверждённого плана восстановления HDD
+
+- name: Найти старый журнал без перехода по символическим ссылкам
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_recovery_journal_stat
+
+- name: Разрешить чтение только прежнего закрытого журнала root
+  ansible.builtin.assert:
+    that:
+      - physical_recovery_journal_stat.stat.isreg | default(false)
+      - not (physical_recovery_journal_stat.stat.islnk | default(false))
+      - physical_recovery_journal_stat.stat.pw_name == 'root'
+      - physical_recovery_journal_stat.stat.mode == '0600'
+    fail_msg: Старый журнал HDD отсутствует или не защищён
+
+- name: Прочитать журнал без его изменения
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/storage-preparation.json
+  register: physical_recovery_journal_bytes
+  no_log: true
+
+- name: Прочитать документ старого подтверждения из журнала
+  ansible.builtin.set_fact:
+    physical_recovery_journal: "{{ physical_recovery_journal_bytes.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Запретить повторную запись при несовпадении прежнего подтверждения
+  ansible.builtin.assert:
+    that:
+      - physical_recovery_journal is mapping
+      - physical_recovery_journal.keys() | list | sort == ['fingerprint', 'items', 'state']
+      - physical_recovery_journal.state == 'started'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
+    fail_msg: Журнал HDD не соответствует разрешённому восстановлению
+  no_log: true
+
+- name: Получить новую фактическую топологию HDD
+  ansible.builtin.command:
+    argv: [lsblk, --json, --tree, --bytes, --output, 'NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS']
+  register: physical_recovery_disk_tree
+  changed_when: false
+
+- name: Доказать наличие единственного системного корня на отдельном SSD
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 1'
+    stdin: "{{ physical_recovery_disk_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+
+- name: Выделить только фактические физические диски
+  ansible.builtin.set_fact:
+    physical_recovery_disks: >-
+      {{ (physical_recovery_disk_tree.stdout | from_json).blockdevices
+         | selectattr('type', 'equalto', 'disk') | list }}
+
+- name: Независимо проверить реальные модели и номера HDD
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - expected | length == 1
+      - actual[0].model is string
+      - expected[0].model | lower in actual[0].model | lower
+      - actual[0].size | int >= (expected[0].capacity_gb | int) * 950000000
+      - actual[0].size | int <= (expected[0].capacity_gb | int) * 1050000000
+      - actual[0].pttype == 'gpt'
+    fail_msg: Диск {{ item.role }} не соответствует прежней подтверждённой подготовке
+  vars:
+    actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ physical_recovery_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Доказать, что восстановление не обращается к системному диску
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_recovery_disk_tree.stdout }}"
+    stdin_add_newline: false
+  loop: "{{ physical_recovery_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+  changed_when: false
+
+- name: Подтвердить единственный ext4-раздел после первой подготовки
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - actual[0].children | default([], true) | length == 1
+      - actual[0].children[0].type == 'part'
+      - actual[0].children[0].fstype == 'ext4'
+      - actual[0].children[0].uuid is match('^[a-fA-F0-9-]{16,40}$')
+      - not (actual[0].children[0].children | default([], true))
+    fail_msg: HDD {{ item.role }} не имеет подтверждённого ext4-раздела
+  vars:
+    actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Независимо прочитать UUID восстановленного ext4
+  ansible.builtin.command:
+    argv: [blkid, -s, UUID, -o, value, "{{ filesystem.path }}"]
+  vars:
+    actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
+    filesystem: "{{ actual[0].children[0] }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  register: physical_recovery_ext4
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сверить UUID восстановленного ext4
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == actual[0].children[0].uuid
+    fail_msg: UUID ext4 после прерванного развёртывания не совпадает
+  vars:
+    actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.item.serial) | list }}"
+  loop: "{{ physical_recovery_ext4.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Прочитать состояние существующих пулов после сбоя
+  ansible.builtin.command:
+    argv: [zpool, status, -P, "{{ volume[0].pool }}"]
+  vars:
+    volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  register: physical_recovery_zpool_status
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить рабочее состояние каждого созданного ZFS
+  ansible.builtin.assert:
+    that:
+      - "('pool: ' ~ volume[0].pool) in item.stdout"
+      - item.stdout is search('(?m)^\\s*state: ONLINE\\s*$')
+      - item.item.serial in item.stdout
+    fail_msg: ZFS-пул не ONLINE или не принадлежит подтверждённому HDD
+  vars:
+    volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.item.role) | list }}"
+  loop: "{{ physical_recovery_zpool_status.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Прочитать GUID старых ZFS-пулов без изменения
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ volume[0].pool }}"]
+  vars:
+    volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  register: physical_recovery_guids
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить корректные GUID восстановленных пулов
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim is match('^[0-9]{1,20}$')
+    fail_msg: Не определён GUID созданного ZFS, восстановление остановлено
+  loop: "{{ physical_recovery_guids.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Подтвердить, что восстановление ничего не форматировало
+  ansible.builtin.debug:
+    msg: Проверена старая попытка создания HDD и независимые UUID/GUID; запись не выполнялась

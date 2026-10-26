@@ -1,0 +1,80 @@
+---
+# Common, read-only storage inventory. Safe even if no physical disks have yet
+# been approved. Intentionally contains no commands able to write to a disk.
+- name: Проверить политику сохранения физических томов
+  ansible.builtin.assert:
+    that:
+      - physical_storage.schema_version == 1
+      - physical_storage.host == physical_host_name
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+      - physical_storage.devices | selectattr('role', 'equalto', 'system') | list | length == 1
+      - physical_storage.devices | map(attribute='id') | list | unique | length == physical_storage.devices | length
+      - physical_storage.volumes | map(attribute='id') | list | unique | length == physical_storage.volumes | length
+      - (physical_storage.devices | selectattr('role', 'equalto', 'system') | first).id not in (physical_storage.volumes | map(attribute='device') | list)
+    fail_msg: Небезопасная декларация физического хранилища; изменения запрещены
+
+- name: Получить фактические диски без изменений
+  ansible.builtin.command:
+    argv:
+      - lsblk
+      - --json
+      - --bytes
+      - --output
+      - NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS
+  register: physical_lsblk
+  changed_when: false
+
+- name: Убедиться в корректности сведений о физических дисках
+  ansible.builtin.assert:
+    that:
+      - (physical_lsblk.stdout | from_json).blockdevices is sequence
+      - (physical_lsblk.stdout | from_json).blockdevices | selectattr('type', 'equalto', 'disk') | list | length > 0
+    fail_msg: lsblk не вернул однозначный список физических накопителей
+
+- name: Выделить реальные физические накопители
+  ansible.builtin.set_fact:
+    physical_actual_disks: >-
+      {{ (physical_lsblk.stdout | from_json).blockdevices
+         | selectattr('type', 'equalto', 'disk') | list }}
+
+- name: Отказать при подмене уже объявленного серийного номера
+  ansible.builtin.assert:
+    that:
+      - matched | length == 1
+      - matched[0].model is string
+      - item.model in matched[0].model | trim
+      - matched[0].size | int >= (item.capacity_gb | int) * 900000000
+      - matched[0].size | int <= (item.capacity_gb | int) * 1100000000
+    fail_msg: Диск {{ item.role }} не соответствует подтверждённой идентичности
+  vars:
+    matched: >-
+      {{ physical_actual_disks
+         | selectattr('serial', 'equalto', item.serial) | list }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+  when: item.serial is not none
+
+- name: Показать обнаруженные накопители без назначения ролей наугад
+  ansible.builtin.debug:
+    msg: >-
+      Диск {{ item.path }}: {{ item.model | default('модель неизвестна', true) }},
+      {{ item.size | int // 1000000000 }} ГБ,
+      serial={{ item.serial | default('не определён', true) }},
+      fstype={{ item.fstype | default('нет', true) }},
+      pttype={{ item.pttype | default('нет', true) }};
+      запись запрещена до отдельного подтверждения
+  loop: "{{ physical_actual_disks }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Проверить, что ещё не подтверждённые диски не получили постоянных путей
+  ansible.builtin.assert:
+    that:
+      - item.serial is not none or item.by_id is none
+    fail_msg: Нельзя назначать by-id диску без подтверждённого серийного номера
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"

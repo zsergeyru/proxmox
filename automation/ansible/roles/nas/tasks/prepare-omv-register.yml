@@ -1,0 +1,166 @@
+---
+# Staged native OMV registration, NOT wired to deploy, repair or recovery.
+# Requires a complete read-only journal/disk/OMV audit in the SAME Ansible
+# play. Never formats, mounts, replaces or deletes any filesystem.
+- name: Разрешить регистрацию OMV только после проверенного восстановления
+  ansible.builtin.assert:
+    that:
+      - nas_omv_registration_authorized | default(false) | bool
+      - physical_host_name == 'nas'
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_journal.state == 'started'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
+      - physical_recovery_ext4.results | length == 1
+      - physical_recovery_guids.results | length == 2
+      - nas_omv_expected_mounts | length == 3
+      - nas_omv_existing_mounts is sequence
+      - nas_omv_mountpoint_audit is mapping
+      - nas_omv_mountpoint_audit.keys() | list | sort == ['backup', 'data', 'shared']
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+    fail_msg: Нет полного проверенного журнала и отдельного разрешения; OMV не изменялась
+
+- name: Проверить отсутствие завершённого назначения HDD на контроллере
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: nas_omv_registration_controller_state
+  delegate_to: localhost
+  become: false
+
+- name: Запретить регистрацию вместо проверки уже развёрнутого NAS
+  ansible.builtin.assert:
+    that:
+      - not (nas_omv_registration_controller_state.stat.exists | default(false))
+      - not (nas_omv_registration_controller_state.stat.islnk | default(false))
+    fail_msg: Диски уже подтверждены контроллером; повторная регистрация запрещена
+
+- name: Повторно прочитать OMV перед первой записью
+  ansible.builtin.command:
+    argv: [omv-confdbadm, read, conf.system.filesystem.mountpoint]
+  register: nas_omv_registration_before
+  changed_when: false
+  no_log: true
+
+- name: Остановиться, если OMV изменилась после независимой проверки
+  ansible.builtin.assert:
+    that:
+      - (nas_omv_registration_before.stdout | from_json) == nas_omv_original_raw
+    fail_msg: База OMV изменилась между проверкой и регистрацией; запись запрещена
+  vars:
+    nas_omv_original_raw: "{{ nas_omv_mountpoints_read.stdout | from_json }}"
+  no_log: true
+
+- name: Не допускать повторения UUID или чужих источников перед записью
+  ansible.builtin.assert:
+    that:
+      - named | length <= 1
+      - by_dir | length <= 1
+      - by_src | length <= 1
+      - >-
+        (by_dir | length == 0 and by_src | length == 0)
+        or (
+          by_dir | length == 1 and by_src | length == 1
+          and by_dir[0].uuid is match('^[a-fA-F0-9-]{36}$')
+          and by_dir[0].uuid == by_src[0].uuid
+          and by_dir[0].type == item.type
+        )
+      - >-
+        by_dir | length == 0 or
+        (named | length == 1 and named[0].uuid == by_dir[0].uuid)
+    fail_msg: Обнаружен конфликт конфигурации OMV, существующие записи сохранены
+  vars:
+    by_dir: "{{ nas_omv_existing_mounts | selectattr('dir', 'equalto', item.dir) | list }}"
+    by_src: "{{ nas_omv_existing_mounts | selectattr('fsname', 'equalto', item.fsname) | list }}"
+    named: >-
+      {{ nas_omv_existing_mounts
+         | selectattr('uuid', 'equalto', nas_omv_mountpoint_audit[item.role].uuid)
+         | list if nas_omv_mountpoint_audit[item.role].uuid else [] }}
+  loop: "{{ nas_omv_expected_mounts }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+# New objects MUST omit uuid: OMV assigns a UUID itself. Existing objects
+# are NEVER written to, including OMV's automatically created ZFS records.
+- name: Зарегистрировать только отсутствующие и проверенные ФС в OMV
+  ansible.builtin.command:
+    argv:
+      - omv-confdbadm
+      - update
+      - conf.system.filesystem.mountpoint
+      - "{{ entry | to_json }}"
+  vars:
+    entry: >-
+      {{ {
+        'fsname': item.fsname,
+        'dir': item.dir,
+        'type': item.type,
+        'opts': ('defaults,nofail,user_xattr,acl' if item.type == 'ext4'
+                 else 'rw,relatime,xattr,noacl,casesensitive'),
+        'freq': 0,
+        'passno': (2 if item.type == 'ext4' else 0),
+        'hidden': (false if item.type == 'ext4' else true)
+      } | combine({} if item.type == 'ext4' else {
+        'usagewarnthreshold': 0, 'comment': ''
+      }) }}
+  loop: "{{ nas_omv_expected_mounts }}"
+  loop_control:
+    label: "{{ item.role }}"
+  when: not (nas_omv_mountpoint_audit[item.role].exists | bool)
+  register: nas_omv_registration_changes
+  changed_when: true
+  no_log: true
+
+- name: Прочитать действительные UUID регистрации, назначенные самой OMV
+  ansible.builtin.command:
+    argv: [omv-confdbadm, read, conf.system.filesystem.mountpoint]
+  register: nas_omv_registration_after
+  changed_when: false
+  no_log: true
+
+- name: Нормализовать фактически сохранённые записи OMV
+  ansible.builtin.set_fact:
+    nas_omv_registered_records: "{{ [raw] if raw is mapping else raw }}"
+  vars:
+    raw: "{{ nas_omv_registration_after.stdout | from_json }}"
+  no_log: true
+
+- name: Подтвердить UUID и идентичность каждого зарегистрированного тома
+  ansible.builtin.assert:
+    that:
+      - by_dir | length == 1
+      - by_src | length == 1
+      - by_dir[0].uuid == by_src[0].uuid
+      - by_dir[0].uuid is match('^[a-fA-F0-9-]{36}$')
+      - by_dir[0].type == item.type
+      - >-
+        nas_omv_mountpoint_audit[item.role].uuid is none or
+        nas_omv_mountpoint_audit[item.role].uuid == by_dir[0].uuid
+    fail_msg: OMV не подтвердила регистрацию либо изменила ранее существующий UUID
+  vars:
+    by_dir: "{{ nas_omv_registered_records | selectattr('dir', 'equalto', item.dir) | list }}"
+    by_src: "{{ nas_omv_registered_records | selectattr('fsname', 'equalto', item.fsname) | list }}"
+  loop: "{{ nas_omv_expected_mounts }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сохранить подтверждённые UUID OMV только в памяти текущего запуска
+  ansible.builtin.set_fact:
+    nas_omv_registered: >-
+      {{ (nas_omv_registered | default({})) | combine({
+          item.role:
+            (nas_omv_registered_records
+             | selectattr('dir', 'equalto', item.dir)
+             | first).uuid
+        }) }}
+  loop: "{{ nas_omv_expected_mounts }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить все три итоговых ссылки OMV
+  ansible.builtin.assert:
+    that:
+      - nas_omv_registered.keys() | list | sort == ['backup', 'data', 'shared']
+      - nas_omv_registered.values() | list | unique | length == 3
+    fail_msg: Несовпадение итоговых UUID OMV; публикация томов запрещена
