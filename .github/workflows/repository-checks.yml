@@ -107,6 +107,9 @@ jobs:
       - name: Check native HDD preparation preflight (no writes)
         run: python scripts/tests/test-physical-storage-ansible-preflight.py
 
+      - name: Check isolated one-shot HDD journal and native filesystem stage
+        run: python scripts/tests/test-physical-storage-ansible-create.py
+
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
 
