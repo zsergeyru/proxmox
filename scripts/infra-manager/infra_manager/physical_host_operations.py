@@ -21,7 +21,7 @@ from .physical_host_ssh import discover_first_host_key
 from dataclasses import replace
 
 
-SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "inspect", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap", "ssh-trust-plan", "ssh-trust-confirm"})
+SUPPORTED_HOST_OPERATIONS = frozenset({"hosts", "status", "storage-plan", "storage-prepare", "deploy", "repair", "bootstrap", "ssh-trust-plan", "ssh-trust-confirm"})
 
 
 def require_host_access(repo_root: Path, host_name: str) -> None:
@@ -111,21 +111,6 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
             raise InfraManagerError("Некорректный закрытый ввод первого подключения")
         bootstrap_physical_host(host, pve_node, payload)
         console.result("SSH-доверие физического сервера установлено через OpenBao")
-        return 0
-    if operation == "inspect":
-        # Generic, read-only inventory through Ansible. The controller must
-        # not interpret vendor-specific disks, shares or services.
-        pve_node = os.environ.get("INFRA_PVE_NODE", "")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
-            raise InfraManagerError("Нет доверенного PVE для временного SSH-сертификата")
-        from .physical_host_ssh import PhysicalHostSshSession
-        from .physical_host_ansible import run_physical_ansible
-        with PhysicalHostSshSession(host, pve_node) as session:
-            run_physical_ansible(
-                repo_root, session,
-                operation="inspect",
-                variables={"physical_host_name": host.name},
-            )
         return 0
     from .physical_host_drivers import run_host_driver
     return run_host_driver(repo_root, operation, host)
