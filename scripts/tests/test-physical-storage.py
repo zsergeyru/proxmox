@@ -139,7 +139,7 @@ def test_cli() -> None:
     parser = build_parser()
     for argv, command in (
         (["hosts"], "hosts"),
-        (["inspect", "nas"], "inspect"),
+        (["deploy", "nas", "--_physical_stage", "plan"], "deploy"),
         (["status", "nas"], "status"),
         (["deploy", "nas"], "deploy"),
         (["deploy", "910"], "deploy"),
