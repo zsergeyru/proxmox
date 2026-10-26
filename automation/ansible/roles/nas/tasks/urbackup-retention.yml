@@ -1,0 +1,355 @@
+---
+# Native Ansible UrBackup localhost API policy reconciliation.
+# The single desired source is infrastructure/hosts/nas/backup.yaml.
+# Only the named local client's archive setting may be updated.
+# All authentication exchanges and HTTP response bodies are suppressed.
+- name: Подтвердить ограниченную политику хранения UrBackup
+  ansible.builtin.assert:
+    that:
+      - nas_backup_policy.server.admin_user == 'admin'
+      - nas_backup_policy.server.web_bind == '127.0.0.1'
+      - nas_backup_policy.server.web_port == 55414
+      - nas_backup_policy.local_client.name == 'nas-local'
+      - nas_backup_policy.retention.keep_daily is integer
+      - nas_backup_policy.retention.keep_weekly is integer
+      - nas_backup_policy.retention.keep_daily | int >= 7
+      - nas_backup_policy.retention.keep_daily | int <= 365
+      - nas_backup_policy.retention.keep_weekly | int >= 4
+      - nas_backup_policy.retention.keep_weekly | int <= 104
+      - nas_backup_policy.retention.max_parallel_jobs == 1
+    fail_msg: Неоднозначная или небезопасная политика хранения UrBackup
+
+- name: Проверить существующий защищённый пароль сервера UrBackup
+  ansible.builtin.stat:
+    path: /etc/nas-apps/urbackup/admin-password
+    follow: false
+  register: nas_retention_password_stat
+  no_log: true
+
+- name: Запретить чтение чужого или публичного пароля
+  ansible.builtin.assert:
+    that:
+      - nas_retention_password_stat.stat.isreg | default(false)
+      - not (nas_retention_password_stat.stat.islnk | default(false))
+      - nas_retention_password_stat.stat.pw_name == 'root'
+      - nas_retention_password_stat.stat.mode == '0600'
+    fail_msg: Не подтверждён защищённый пароль администратора UrBackup
+
+- name: Получить пароль только в оперативную память удалённого Ansible
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/urbackup/admin-password
+  register: nas_retention_password_bytes
+  no_log: true
+
+- name: Ограничить размер секретного значения
+  ansible.builtin.assert:
+    that:
+      - nas_retention_password_bytes.content | b64decode | trim | length >= 32
+      - nas_retention_password_bytes.content | b64decode | trim | length <= 128
+    fail_msg: Некорректный пароль UrBackup
+  no_log: true
+
+- name: Создать канонические требуемые правила только для локального клиента
+  ansible.builtin.set_fact:
+    nas_retention_desired_rules: {}
+  no_log: true
+
+- name: Описать ежедневное и еженедельное файловое архивирование
+  ansible.builtin.set_fact:
+    nas_retention_desired_rules: >-
+      {{ nas_retention_desired_rules | combine({
+        'every_' ~ item.suffix: item.interval | string,
+        'every_unit_' ~ item.suffix: item.unit,
+        'for_' ~ item.suffix: item.duration | string,
+        'for_unit_' ~ item.suffix: item.unit,
+        'backup_type_' ~ item.suffix: 'file',
+        'window_' ~ item.suffix: '*;*;*;*',
+        'letters_' ~ item.suffix: ''
+      }) }}
+  loop:
+    - suffix: c0
+      interval: 86400
+      duration: "{{ nas_backup_policy.retention.keep_daily | int * 86400 }}"
+      unit: d
+    - suffix: c1
+      interval: 604800
+      duration: "{{ nas_backup_policy.retention.keep_weekly | int * 604800 }}"
+      unit: w
+  no_log: true
+
+- name: Прочитать анонимное состояние локального API
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=login"
+    method: POST
+    body_format: form-urlencoded
+    body: {}
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_anonymous
+  changed_when: false
+  no_log: true
+
+- name: Запретить анонимный доступ к административному API
+  ansible.builtin.assert:
+    that:
+      - (nas_retention_anonymous.content | from_json).success | default(false) != true
+    fail_msg: UrBackup разрешает анонимный административный доступ
+
+- name: Получить соль и challenge для администратора через localhost
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=salt"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      username: "{{ nas_backup_policy.server.admin_user }}"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_salt_http
+  changed_when: false
+  no_log: true
+
+- name: Разобрать ответ аутентификации без вывода токена
+  ansible.builtin.set_fact:
+    nas_retention_salt: "{{ nas_retention_salt_http.content | from_json }}"
+  no_log: true
+
+- name: Проверить исходный ответ сервера перед вычислением challenge
+  ansible.builtin.assert:
+    that:
+      - nas_retention_salt.ses is string
+      - nas_retention_salt.ses is match('^[A-Za-z0-9_-]{8,256}$')
+      - nas_retention_salt.salt is string
+      - nas_retention_salt.salt is match('^[A-Za-z0-9+/=_-]{4,256}$')
+      - nas_retention_salt.rnd is string
+      - nas_retention_salt.rnd is match('^[A-Za-z0-9+/=_-]{4,256}$')
+      - nas_retention_salt.pbkdf2_rounds | default(0) | int >= 0
+      - nas_retention_salt.pbkdf2_rounds | default(0) | int <= 1000000
+    fail_msg: UrBackup вернул неожиданное состояние challenge авторизации
+  no_log: true
+
+- name: Сформировать стартовый MD5 digest согласно API UrBackup
+  ansible.builtin.set_fact:
+    nas_retention_auth_hash: >-
+      {{ (nas_retention_salt.salt ~ (nas_retention_password_bytes.content | b64decode | trim)) | hash('md5') }}
+  no_log: true
+
+# OpenSSL PBKDF2 is needed for UrBackup 2.5.x. Only the salted MD5 digest,
+# never the original password, is passed to the short-lived KDF subprocess.
+- name: Вычислить PBKDF2-SHA256 через системный OpenSSL, если требует UrBackup
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - kdf
+      - -keylen
+      - "32"
+      - -kdfopt
+      - digest:SHA256
+      - -kdfopt
+      - "hexpass:{{ nas_retention_auth_hash }}"
+      - -kdfopt
+      - "salt:{{ nas_retention_salt.salt }}"
+      - -kdfopt
+      - "iter:{{ nas_retention_salt.pbkdf2_rounds | int }}"
+      - PBKDF2
+  register: nas_retention_pbkdf2
+  changed_when: false
+  no_log: true
+  when: nas_retention_salt.pbkdf2_rounds | default(0) | int > 0
+
+- name: Применить вычисленный digest без сохранения на диск
+  ansible.builtin.set_fact:
+    nas_retention_auth_hash: "{{ nas_retention_pbkdf2.stdout | regex_replace(':', '') | lower }}"
+  when: nas_retention_salt.pbkdf2_rounds | default(0) | int > 0
+  no_log: true
+
+- name: Проверить ожидаемую длину digest
+  ansible.builtin.assert:
+    that:
+      - nas_retention_auth_hash is match('^[a-f0-9]{32}$') or nas_retention_auth_hash is match('^[a-f0-9]{64}$')
+    fail_msg: Криптографический ответ UrBackup имеет неверную длину
+  no_log: true
+
+- name: Пройти проверяемую авторизацию через API UrBackup
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=login"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      ses: "{{ nas_retention_salt.ses }}"
+      username: "{{ nas_backup_policy.server.admin_user }}"
+      password: "{{ (nas_retention_salt.rnd ~ nas_retention_auth_hash) | hash('md5') }}"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_login
+  changed_when: false
+  no_log: true
+
+- name: Отказать, если UrBackup не подтвердил администратора
+  ansible.builtin.assert:
+    that:
+      - (nas_retention_login.content | from_json).success | default(false) == true
+    fail_msg: UrBackup отклонил локального администратора
+  no_log: true
+
+- name: Получить список клиентов без операций записи
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=status"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      ses: "{{ nas_retention_salt.ses }}"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_clients_http
+  changed_when: false
+  no_log: true
+
+- name: Найти только явно объявленный nas-local
+  ansible.builtin.set_fact:
+    nas_retention_clients: >-
+      {{ (nas_retention_clients_http.content | from_json).status
+         | selectattr('name', 'equalto', nas_backup_policy.local_client.name) | list }}
+  no_log: true
+
+- name: Запретить отсутствующего или повторяющегося клиента
+  ansible.builtin.assert:
+    that:
+      - nas_retention_clients | length == 1
+      - nas_retention_clients[0].id is integer
+      - nas_retention_clients[0].id | int > 0
+    fail_msg: Единственный nas-local клиент UrBackup ещё не зарегистрирован
+
+- name: Получить клиентские настройки отдельно от глобальных
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=settings"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      ses: "{{ nas_retention_salt.ses }}"
+      sa: clientsettings
+      t_clientid: "{{ nas_retention_clients[0].id | string }}"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_settings_http
+  changed_when: false
+  no_log: true
+
+- name: Прочитать только настройку archive выбранного клиента
+  ansible.builtin.set_fact:
+    nas_retention_archive: "{{ (nas_retention_settings_http.content | from_json).settings.archive }}"
+  no_log: true
+
+- name: Проверить структуру ответов UrBackup до какой-либо записи
+  ansible.builtin.assert:
+    that:
+      - nas_retention_archive is mapping
+      - nas_retention_archive.value is string
+      - nas_retention_archive.use is integer
+    fail_msg: UrBackup вернул неизвестный формат политики клиента
+  no_log: true
+
+- name: Сопоставить текущие правила с декларацией без технических UUID UrBackup
+  ansible.builtin.set_fact:
+    nas_retention_actual_parts: >-
+      {{ nas_retention_archive.value.split('&')
+         | reject('equalto', '')
+         | reject('match', '^(uuid_|next_archival_|timeleft_)')
+         | list | sort }}
+    nas_retention_desired_parts: >-
+      {{ (nas_retention_desired_rules | urlencode).split('&') | sort }}
+  no_log: true
+
+- name: Определить идемпотентность клиентского архива
+  ansible.builtin.set_fact:
+    nas_retention_matches: >-
+      {{ nas_retention_actual_parts == nas_retention_desired_parts
+         and ((nas_retention_archive.use | int) % 4 >= 2) }}
+  no_log: true
+
+- name: Не заменять пользовательскую политику или чужие архивы
+  ansible.builtin.assert:
+    that:
+      - nas_retention_matches | bool or nas_retention_actual_parts | length == 0
+    fail_msg: У nas-local уже есть иные архивные правила; изменение запрещено
+  no_log: true
+
+- name: Установить только недостающие клиентские правила хранения
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=settings"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      ses: "{{ nas_retention_salt.ses }}"
+      sa: clientsettings_save
+      t_clientid: "{{ nas_retention_clients[0].id | string }}"
+      archive: "{{ nas_retention_desired_rules | urlencode }}"
+      archive.use: "2"
+      overwrite: "true"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_write_http
+  when: not (nas_retention_matches | bool)
+  changed_when: true
+  no_log: true
+
+- name: Убедиться, что сервер подтвердил сохранение новых правил
+  ansible.builtin.assert:
+    that:
+      - "'saved_ok' in (nas_retention_write_http.content | from_json)"
+    fail_msg: UrBackup не подтвердил запись архивной политики
+  when: not (nas_retention_matches | bool)
+  no_log: true
+
+- name: Прочитать настройки клиента повторно после reconcile
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a=settings"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      ses: "{{ nas_retention_salt.ses }}"
+      sa: clientsettings
+      t_clientid: "{{ nas_retention_clients[0].id | string }}"
+    use_proxy: false
+    follow_redirects: none
+    status_code: 200
+    return_content: true
+    timeout: 12
+  register: nas_retention_verified_http
+  changed_when: false
+  no_log: true
+
+- name: Получить подтверждённую политику с того же клиента
+  ansible.builtin.set_fact:
+    nas_retention_verified_archive: "{{ (nas_retention_verified_http.content | from_json).settings.archive }}"
+  no_log: true
+
+- name: Независимо подтвердить завершение изменения настроек хранения
+  ansible.builtin.assert:
+    that:
+      - nas_retention_verified_archive.use is integer
+      - (nas_retention_verified_archive.use | int) % 4 >= 2
+      - >-
+        (nas_retention_verified_archive.value.split('&') |
+         reject('equalto', '') |
+         reject('match', '^(uuid_|next_archival_|timeleft_)') |
+         list | sort) == nas_retention_desired_parts
+    fail_msg: UrBackup не подтвердил сохранённые правила nas-local
+  no_log: true
