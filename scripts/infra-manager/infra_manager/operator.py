@@ -806,8 +806,6 @@ def build_parser() -> argparse.ArgumentParser:
         "hosts",
         help="показать физические серверы",
     )
-    preparer = subparsers.add_parser("storage-prepare", help=argparse.SUPPRESS)
-    preparer.add_argument("name")
     state = subparsers.add_parser("bootstrap-state", help=argparse.SUPPRESS)
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
@@ -818,18 +816,6 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("ssh-trust-plan", "ssh-trust-confirm"):
         trust = subparsers.add_parser(command, help=argparse.SUPPRESS)
         trust.add_argument("name")
-    plan_parser = subparsers.add_parser(
-        "storage-plan",
-        help="предложить назначение дисков NAS без изменений",
-    )
-    plan_parser.add_argument("name")
-
-    inspect_parser = subparsers.add_parser(
-        "inspect",
-        help="проверить оборудование физического сервера (без изменений)",
-    )
-    inspect_parser.add_argument("name", type=str)
-
     status_parser = subparsers.add_parser(
         "status",
         help="проверить управляющий контур или выбранного гостя",
@@ -847,6 +833,14 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("vmid", type=str, help="VMID гостя или имя физического сервера")
+        if command == "deploy":
+            # Internal phases of the SAME deploy command, exclusively from PVE.
+            # Do not add public storage-plan/inspect/storage-prepare commands.
+            command_parser.add_argument(
+                "--_physical_stage",
+                choices=("plan", "prepare"),
+                help=argparse.SUPPRESS,
+            )
 
     repair_parser = subparsers.add_parser(
         "repair",
@@ -908,17 +902,6 @@ def main(argv: list[str] | None = None) -> int:
             if not payload or len(payload) > 2047 or not payload.endswith("\n"):
                 raise InfraManagerError("Не получено подтверждение SSH-ключа")
             return operator_physical_task("ssh-trust-confirm", args.name, input_text=payload)
-        if args.command == "storage-prepare":
-            if not show_secrets:
-                raise InfraManagerError("Подготовка дисков разрешена только с доверенного PVE")
-            payload = sys.stdin.readline(2048)
-            if not payload or len(payload) > 2047 or not payload.endswith("\n"):
-                raise InfraManagerError("Подготовка HDD требует отдельного подтверждения")
-            return operator_physical_task("storage-prepare", args.name, input_text=payload)
-        if args.command == "storage-plan":
-            return operator_physical_task("storage-plan", args.name)
-        if args.command == "inspect":
-            return operator_physical_task("inspect", args.name)
         if args.command == "status":
             if args.vmid is None:
                 return operator_status(show_secrets=show_secrets)
@@ -932,6 +915,21 @@ def main(argv: list[str] | None = None) -> int:
                 args.vmid, "repair", show_secrets=show_secrets,
             )
         if args.command in {"deploy", "sync"}:
+            internal_stage = getattr(args, "_physical_stage", None)
+            if internal_stage is not None:
+                if not show_secrets or args.vmid.isdecimal():
+                    raise InfraManagerError(
+                        "Внутренний этап deploy физического сервера разрешён "
+                        "только через доверенный оператор PVE"
+                    )
+                if internal_stage == "plan":
+                    return operator_physical_task("storage-plan", args.vmid)
+                payload = sys.stdin.readline(2048)
+                if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+                    raise InfraManagerError("Подготовка HDD требует подтверждения в deploy")
+                return operator_physical_task(
+                    "storage-prepare", args.vmid, input_text=payload,
+                )
             return _operator_target(
                 args.vmid, args.command, show_secrets=show_secrets,
             )
