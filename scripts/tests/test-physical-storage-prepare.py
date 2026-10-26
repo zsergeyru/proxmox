@@ -58,7 +58,12 @@ def sample_plan():
         DiskInspection("/dev/sdc", "ST4000VX016", "ZFS-A", 4_000_000_000_000, False, False),
         DiskInspection("/dev/sdd", "ST4000VX016", "ZFS-B", 4_000_000_000_000, False, False),
     )
-    return host, propose_storage(host.devices, disks)
+    # These fixtures cover historical unpinned creation; production NAS now
+    # pins real serials and runs adoption only.
+    fixture_host = replace(
+        host, devices=tuple({**device, "serial": None} for device in host.devices)
+    )
+    return fixture_host, propose_storage(fixture_host.devices, disks)
 
 
 def test_confirmation():
