@@ -80,6 +80,24 @@
       - nas_mirror_active_sources | difference(nas_mirror_allowed_sources) | length == 0
     fail_msg: Список APT OMV отличается от разрешённых официальных репозиториев
 
+- name: Не допустить символьные ссылки в каталогах APT и журнала
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/apt/mirrors
+    - /var/lib/infra-manager
+  register: nas_mirror_parent_paths
+
+- name: Подтвердить безопасные родительские каталоги перед записью
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - not (item.stat.exists | default(false)) or item.stat.isdir | default(false)
+      - not (item.stat.exists | default(false)) or item.stat.pw_name == 'root'
+    fail_msg: Родительский каталог APT является ссылкой или подменён
+  loop: "{{ nas_mirror_parent_paths.results }}"
+
 - name: Создать только необходимые каталоги для безопасной замены APT
   ansible.builtin.file:
     path: "{{ item.path }}"
