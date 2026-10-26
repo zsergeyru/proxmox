@@ -38,7 +38,19 @@ class CallbackModule(CallbackBase):
             or not isinstance(payload["items"], list)
             or not 1 <= len(payload["items"]) <= 25
             or not isinstance(payload["requires_creation"], bool)
-            or payload["recovery_fingerprint"] is not None
+            or (
+                payload["recovery_fingerprint"] is not None
+                and (
+                    not isinstance(payload["recovery_fingerprint"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", payload["recovery_fingerprint"])
+                    or payload["recovery_fingerprint"] != payload["fingerprint"]
+                    or payload["requires_creation"]
+                    or any(
+                        not isinstance(item, dict) or item.get("action") != "preserve"
+                        for item in payload["items"]
+                    )
+                )
+            )
         ):
             return
         self._display.display(prefix + json.dumps(payload, ensure_ascii=True, separators=(",", ":")))

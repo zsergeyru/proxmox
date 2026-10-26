@@ -517,7 +517,10 @@ def test_disabled_recovery_transaction_has_strict_order() -> None:
     ]
     assert "ansible.builtin.debug" in tasks[-1]
     for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
-        assert "prepare-recover-complete.yml" not in playbook.read_text(), playbook
+        if playbook.name == "prepare-nas-storage.yml":
+            assert "tasks_from: prepare-recover-complete.yml" in playbook.read_text(), playbook
+        else:
+            assert "prepare-recover-complete.yml" not in playbook.read_text(), playbook
     for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
         if role == path:
             continue
@@ -527,6 +530,37 @@ def test_disabled_recovery_transaction_has_strict_order() -> None:
         else:
             assert "prepare-recover-complete.yml" not in source, role
 
+
+
+def test_resume_only_after_complete_journal_without_writes() -> None:
+    """The single deploy entry only finalizes a fully formatted, verified journal."""
+    entry = ROOT / "automation/ansible/playbooks/prepare-nas-storage.yml"
+    source = entry.read_text(encoding="utf-8")
+    tasks = yaml.safe_load(source)[0]["tasks"]
+    resume = [t for t in tasks if t.get("ansible.builtin.include_role", {}).get("tasks_from") == "prepare-recover-complete.yml"]
+    assert len(resume) == 1
+    assert resume[0]["ansible.builtin.include_role"]["name"] == "nas"
+    assert resume[0]["vars"]["physical_disk_intent"]["mode"] == "recover"
+    assert resume[0]["vars"]["physical_recovery_intent"]["mode"] == "recover"
+    assert "physical_plan_previous_journal.stat.exists" in str(resume[0]["when"])
+    assert "physical_plan_layout_ready" in str(resume[0]["when"])
+    assert "prepare-write.yml" not in source
+    for t in tasks:
+        if t.get("ansible.builtin.include_role", {}).get("tasks_from") in ("adopt-storage.yml", "initialize-blank.yml"):
+            assert "not (physical_plan_previous_journal.stat.exists" in str(t["when"])
+    p = (ROLE / "plan.yml").read_text(encoding="utf-8")
+    for guard in (
+        "physical_plan_recovery_journal.fingerprint",
+        "physical_plan_original_fingerprint == physical_plan_recovery_journal.fingerprint",
+        "physical_plan_layout_ready | bool",
+        "physical_plan_previous_journal.stat.mode == '0600'",
+        "physical_plan_previous_journal.stat.pw_name == 'root'",
+        "physical_plan_recovery_journal['items']",
+    ):
+        assert guard in p, guard
+    c = (ROOT / "automation/ansible/callback_plugins/infra_storage_plan.py").read_text(encoding="utf-8")
+    assert 'payload["recovery_fingerprint"] != payload["fingerprint"]' in c
+    assert 'item.get("action") != "preserve"' in c
 
 
 def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
@@ -624,5 +658,6 @@ if __name__ == "__main__":
     test_observed_identity_includes_system_disk_without_writes()
     test_generic_observed_state_persistence_is_one_shot()
     test_disabled_recovery_transaction_has_strict_order()
+    test_resume_only_after_complete_journal_without_writes()
     test_disabled_first_create_is_journal_first_and_unreachable()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")

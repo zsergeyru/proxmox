@@ -59,14 +59,51 @@
     follow: false
   register: physical_plan_previous_journal
 
-- name: Запретить повторную очистку при неоконченном старом журнале
+- name: Убедиться, что журнал не подменён и доступен только root
   ansible.builtin.assert:
     that:
-      - >-
-        (physical_plan_previous.stat.exists | default(false)) or
-        not (physical_plan_previous_journal.stat.exists | default(false))
       - not (physical_plan_previous_journal.stat.islnk | default(false))
-    fail_msg: Старый журнал требует проверки восстановления; новый формат запрещён
+      - >-
+        not (physical_plan_previous_journal.stat.exists | default(false))
+        or (
+          physical_plan_previous_journal.stat.isreg | default(false)
+          and physical_plan_previous_journal.stat.mode == '0600'
+          and physical_plan_previous_journal.stat.pw_name == 'root'
+        )
+    fail_msg: Повреждён или подменён журнал HDD; доступ запрещён
+
+- name: Прочитать журнал при отсутствии окончательной записи контроллера
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/storage-preparation.json
+  register: physical_plan_journal_bytes
+  no_log: true
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_previous_journal.stat.exists | default(false)
+
+- name: Разобрать закрытый журнал без доверия к его содержимому
+  ansible.builtin.set_fact:
+    physical_plan_recovery_journal: "{{ physical_plan_journal_bytes.content | b64decode | from_json }}"
+  no_log: true
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_previous_journal.stat.exists | default(false)
+
+- name: Допустить к сверке только прежний полный one-shot план NAS
+  ansible.builtin.assert:
+    that:
+      - physical_plan_recovery_journal is mapping
+      - physical_plan_recovery_journal.keys() | list | sort == ['fingerprint', 'items', 'state']
+      - physical_plan_recovery_journal.state == 'started'
+      - physical_plan_recovery_journal.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_plan_recovery_journal['items'] | length == 3
+      - physical_plan_recovery_journal['items'] | map(attribute='role') | list == ['shared', 'data', 'backup']
+      - physical_plan_recovery_journal['items'] | map(attribute='action') | list == ['create-ext4', 'create-zfs', 'create-zfs']
+      - physical_plan_recovery_journal['items'] | map(attribute='serial') | unique | list | length == 3
+    fail_msg: Старый журнал не является полным первоначальным планом NAS
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_previous_journal.stat.exists | default(false)
 
 - name: Подготовить детерминированное распределение физических дисков
   ansible.builtin.set_fact:
@@ -92,6 +129,23 @@
       - physical_plan_assignments[0].role == 'system'
     fail_msg: Невозможно подтвердить полное назначение накопителей
 
+- name: Сохранить исходный fingerprint до изменения действий на preserve
+  ansible.builtin.set_fact:
+    physical_plan_original_fingerprint: >-
+      {{ (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
+
+- name: Допустить восстановление лишь при полном совпадении исходного плана
+  ansible.builtin.assert:
+    that:
+      - physical_plan_layout_ready | bool
+      - physical_plan_original_fingerprint == physical_plan_recovery_journal.fingerprint
+      - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='serial') | list == physical_plan_recovery_journal['items'] | map(attribute='serial') | list
+      - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='action') | unique | list == ['recreate']
+    fail_msg: Разметка после сбоя не доказана полной; новая запись запрещена
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_previous_journal.stat.exists | default(false)
+
 - name: Не пересоздавать уже правильно размеченные и проверяемые ext4/ZFS
   ansible.builtin.set_fact:
     physical_plan_assignments: >-
@@ -105,7 +159,10 @@
 - name: Вычислить неизменный отпечаток физического плана
   ansible.builtin.set_fact:
     physical_plan_fingerprint: >-
-      {{ (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
+      {{ physical_plan_original_fingerprint
+         if (not (physical_plan_previous.stat.exists | default(false))
+             and (physical_plan_previous_journal.stat.exists | default(false)))
+         else (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
 
 - name: Опубликовать план только через allowlisted stdout callback
   ansible.builtin.debug:
@@ -116,6 +173,11 @@
         'requires_creation': (
           physical_plan_assignments | rejectattr('action', 'equalto', 'preserve') | list | length > 0
         ),
-        'recovery_fingerprint': none,
+        'recovery_fingerprint': (
+          physical_plan_original_fingerprint
+          if (not (physical_plan_previous.stat.exists | default(false))
+              and (physical_plan_previous_journal.stat.exists | default(false)))
+          else none
+        ),
         'items': physical_plan_assignments
       } | to_json }}
