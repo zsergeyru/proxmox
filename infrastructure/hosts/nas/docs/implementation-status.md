@@ -248,7 +248,6 @@ Ansible пока **не завершены**; запуск с неподтвер
 к пробному запуску:
 
 ```bash
-infra-manager inspect nas
 infra-manager deploy nas
 infra-manager status nas
 ```
