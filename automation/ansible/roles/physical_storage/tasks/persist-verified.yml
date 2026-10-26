@@ -9,14 +9,14 @@
       - physical_storage_state_commit_authorized | default(false) | bool
       - physical_host_name is match('^[a-z][a-z0-9-]*$')
       - physical_storage.host == physical_host_name
-      - physical_disk_intent.host == physical_host_name
-      - physical_disk_intent.mode == 'recover'
-      - physical_disk_intent.fingerprint is match('^[0-9a-f]{64}$')
-      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
-      - physical_recovery_journal['items'] == physical_disk_intent['items']
+      - physical_recovery_intent.host == physical_host_name
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_intent.fingerprint is match('^[0-9a-f]{64}$')
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
       - physical_observed_storage is mapping
       - physical_observed_storage.keys() | list | sort == ['devices', 'plan_fingerprint', 'volumes']
-      - physical_observed_storage.plan_fingerprint == physical_disk_intent.fingerprint
+      - physical_observed_storage.plan_fingerprint == physical_recovery_intent.fingerprint
       - physical_storage.policies.existing_data == 'preserve'
       - physical_storage.policies.unverified_devices == 'reject_writes'
       - physical_storage.policies.missing_mount == 'reject_writes'
