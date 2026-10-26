@@ -1,0 +1,218 @@
+---
+# Generic one-time commit of previously verified physical storage identity.
+# Staged role, NOT wired to any supported deploy/repair/status path.
+# Requires facts from a complete in-process Ansible journal, hardware and
+# mount verification. Never writes to physical disks or alters SSH trust.
+- name: Потребовать явно разрешённую запись полного наблюдаемого состояния
+  ansible.builtin.assert:
+    that:
+      - physical_storage_state_commit_authorized | default(false) | bool
+      - physical_host_name is match('^[a-z][a-z0-9-]*$')
+      - physical_storage.host == physical_host_name
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.mode == 'recover'
+      - physical_disk_intent.fingerprint is match('^[0-9a-f]{64}$')
+      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_disk_intent['items']
+      - physical_observed_storage is mapping
+      - physical_observed_storage.keys() | list | sort == ['devices', 'plan_fingerprint', 'volumes']
+      - physical_observed_storage.plan_fingerprint == physical_disk_intent.fingerprint
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Нет проверенного Ansible-состояния; сохранение назначения HDD запрещено
+
+- name: Сверить полный состав физических HDD/SSD перед записью
+  ansible.builtin.assert:
+    that:
+      - physical_observed_storage.devices | length == physical_storage.devices | length
+      - physical_observed_storage.devices | map(attribute='role') | list | sort == physical_storage.devices | map(attribute='role') | list | sort
+      - physical_observed_storage.devices | map(attribute='serial') | unique | list | length == physical_observed_storage.devices | length
+      - physical_observed_storage.volumes.keys() | list | sort == physical_storage.volumes | map(attribute='id') | list | sort
+    fail_msg: В наблюдаемом состоянии отсутствуют физические диски или тома
+
+- name: Проверить каждую роль накопителя по декларации и реальным serial
+  ansible.builtin.assert:
+    that:
+      - matches | length == 1
+      - matches[0].serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - matches[0].model == item.model
+      - matches[0].capacity_gb | int == item.capacity_gb | int
+      - item.serial is none or item.serial == matches[0].serial
+    fail_msg: Отказ при несоответствии физического диска {{ item.role }}
+  vars:
+    matches: >-
+      {{ physical_observed_storage.devices
+         | selectattr('role', 'equalto', item.role) | list }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить идентичность каждого тома и ссылку на OMV
+  ansible.builtin.assert:
+    that:
+      - found is mapping
+      - found.mountpoint is match('^/[A-Za-z0-9_./-]+$')
+      - found.omv_reference is match('^[a-fA-F0-9-]{36}$')
+      - >-
+        (item.kind == 'ext4'
+         and found.filesystem_uuid is match('^[a-fA-F0-9-]{16,40}$')
+         and found.mountpoint == '/srv/dev-disk-by-uuid-' ~ found.filesystem_uuid)
+        or
+        (item.kind == 'zfs_pool'
+         and found.pool == item.pool
+         and found.pool_guid is match('^[0-9]{1,20}$')
+         and found.mountpoint == '/' ~ item.pool)
+    fail_msg: UUID/GUID физического тома {{ item.id }} не доказан
+  vars:
+    found: "{{ physical_observed_storage.volumes[item.id] | default({}) }}"
+  loop: "{{ physical_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Проверить защищённый каталог наблюдаемого состояния на контроллере
+  ansible.builtin.stat:
+    path: /var/lib/infra-manager/physical-hosts
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_state_directory
+
+- name: Отказаться сохранять данные в незнакомый каталог
+  ansible.builtin.assert:
+    that:
+      - physical_state_directory.stat.isdir | default(false)
+      - not (physical_state_directory.stat.islnk | default(false))
+      - physical_state_directory.stat.mode in ['0700', '0750']
+    fail_msg: Нет защищённого каталога physical-hosts управляющего гостя
+
+- name: Проверить защищённую запись доверенного SSH-ключа контроллера
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}.json"
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_state_ssh_record
+
+- name: Не сохранять диски без ранее установленного SSH-доверия
+  ansible.builtin.assert:
+    that:
+      - physical_state_ssh_record.stat.isreg | default(false)
+      - not (physical_state_ssh_record.stat.islnk | default(false))
+      - physical_state_ssh_record.stat.mode == '0600'
+    fail_msg: Нет защищённого доказательства идентичности физического сервера
+
+- name: Прочитать доверенный отпечаток SSH с контроллера
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}.json"
+  register: physical_state_ssh_bytes
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Сверить SSH-доверие, адрес и назначение физического сервера
+  ansible.builtin.set_fact:
+    physical_state_ssh_identity: "{{ physical_state_ssh_bytes.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Остановиться при несовпадении SSH и текущей цели Ansible
+  ansible.builtin.assert:
+    that:
+      - physical_state_ssh_identity.name == physical_host_name
+      - physical_state_ssh_identity.address == ansible_host
+      - physical_state_ssh_identity.fingerprint is match('^SHA256:[A-Za-z0-9+/]{43}$')
+    fail_msg: Сведения об SSH-доверии больше не соответствуют физическому серверу
+
+- name: Проверить, не осталось ли прежнего назначения в старом каталоге
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/locks/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_state_legacy_file
+  delegate_to: localhost
+  become: false
+
+- name: Запретить создать другое назначение поверх старой записи
+  ansible.builtin.assert:
+    that:
+      - not (physical_state_legacy_file.stat.exists | default(false))
+      - not (physical_state_legacy_file.stat.islnk | default(false))
+    fail_msg: Прежнее физическое состояние не перенесено, автоматическая запись запрещена
+
+- name: Собрать единственный подтверждённый документ без секретов
+  ansible.builtin.set_fact:
+    physical_storage_state_document:
+      name: "{{ physical_host_name }}"
+      address: "{{ ansible_host }}"
+      fingerprint: "{{ physical_state_ssh_identity.fingerprint }}"
+      devices: "{{ physical_observed_storage.devices }}"
+      volumes: "{{ physical_observed_storage.volumes }}"
+  no_log: true
+
+- name: Проверить, существует ли ранее зафиксированная идентичность
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_state_existing_file
+  delegate_to: localhost
+  become: false
+
+- name: Запретить символические ссылки и незакрытые файлы назначения
+  ansible.builtin.assert:
+    that:
+      - not (physical_state_existing_file.stat.islnk | default(false))
+      - >-
+        not (physical_state_existing_file.stat.exists | default(false))
+        or (
+          physical_state_existing_file.stat.isreg | default(false)
+          and physical_state_existing_file.stat.mode == '0600'
+        )
+    fail_msg: Старое состояние повреждено, автоматическая перезапись запрещена
+
+- name: Прочитать сохранённое назначение для проверки идемпотентности
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+  delegate_to: localhost
+  become: false
+  register: physical_state_existing_bytes
+  when: physical_state_existing_file.stat.exists | default(false)
+  no_log: true
+
+- name: Отказать при попытке заменить ранее подтверждённые HDD
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (physical_state_existing_file.stat.exists | default(false))
+        or (physical_state_existing_bytes.content | b64decode | from_json)
+           == physical_storage_state_document
+    fail_msg: Существующее назначение HDD/UUID/GUID изменилось, перезапись запрещена
+  no_log: true
+
+- name: Однократно сохранить подтверждённые UUID и GUID в постоянное состояние 910
+  ansible.builtin.copy:
+    dest: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    content: "{{ physical_storage_state_document | to_nice_json }}
+"
+    mode: '0600'
+    force: false
+    follow: false
+    unsafe_writes: false
+  delegate_to: localhost
+  become: false
+  when: not (physical_state_existing_file.stat.exists | default(false))
+  register: physical_state_committed
+  no_log: true
+
+- name: Проверить окончательную запись UUID/GUID без изменения
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+  delegate_to: localhost
+  become: false
+  register: physical_state_verified_bytes
+  no_log: true
+
+- name: Подтвердить точное совпадение неизменяемого состояния в 910
+  ansible.builtin.assert:
+    that:
+      - (physical_state_verified_bytes.content | b64decode | from_json) == physical_storage_state_document
+    fail_msg: Наблюдаемое состояние на 910 не подтвердилось, деплой остановлен
+  no_log: true
