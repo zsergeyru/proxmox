@@ -268,8 +268,34 @@ def test_driver_is_not_used_for_schema_or_inspect() -> None:
     assert "omv8" not in controller
 
 
+def test_generic_operator_services_derive_endpoints_from_yaml() -> None:
+    """910 must not hardcode any physical host IP/port or guess OMV's URL."""
+    from infra_manager.physical_host_credentials import operator_status_sections
+
+    with patch("builtins.print") as output:
+        operator_status_sections(ROOT, "nas", "192.168.1.12", show_secrets=False)
+    lines = "\n".join(" ".join(str(arg) for arg in call.args)
+                      for call in output.call_args_list)
+    assert "192.168.1.12:8080/" in lines
+    assert "127.0.0.1:55414/" in lines
+    assert "SSH-туннель" in lines
+    assert "точный URL определяется" in lines
+    assert "OpenMediaVault" in lines
+    assert "qBittorrent" in lines
+    assert "UrBackup Server" in lines
+    assert "admin" in lines
+    assert "сервере" in lines
+    assert "Пароль:" in lines
+    assert "скрыт" in lines
+    assert "0000" not in lines
+    source = (ROOT / "scripts/infra-manager/infra_manager/physical_host_credentials.py").read_text()
+    for forbidden in ("192.168.1.12", "nas-data", "qbittorrent", "urbackup", "OpenMediaVault"):
+        assert forbidden not in source, forbidden
+
+
 if __name__ == "__main__":
     test_generic_ansible_transport()
+    test_generic_operator_services_derive_endpoints_from_yaml()
     test_native_disk_read_only_contract()
     test_driverless_physical_operations_route_to_ansible()
     test_driver_is_not_used_for_schema_or_inspect()
