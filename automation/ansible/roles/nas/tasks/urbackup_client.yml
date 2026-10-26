@@ -11,10 +11,8 @@
       - nas_urbackup_timezone is match('^[A-Za-z0-9_+/-]+$')
     fail_msg: Недостоверная политика Docker-клиента UrBackup
 
-- name: Проверить ZFS до доступа Docker-клиента
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-safe, preflight]
-  changed_when: false
+- name: Независимо проверить source/backup ZFS стандартным Ansible
+  ansible.builtin.include_tasks: urbackup-verify-volumes.yml
 
 - name: Установить проверяемый исполнитель ZFS снимка
   ansible.builtin.copy:
@@ -44,10 +42,8 @@
     - /var/lib/nas-apps/urbackup/client/data
     - /var/lib/nas-apps/urbackup/client/config
 
-- name: Подготовить отдельную shared mount-точку для ZFS снимков
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-client-mount, prepare]
-  changed_when: false
+- name: Подготовить shared staging для снимков через Ansible
+  ansible.builtin.include_tasks: urbackup-client-staging.yml
 
 - name: Установить только локальные настройки backend UrBackup
   ansible.builtin.template:
