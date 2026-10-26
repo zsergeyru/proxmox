@@ -206,7 +206,7 @@ def test_driverless_physical_operations_route_to_ansible() -> None:
         assert calls[0]["callback"] == "infra_storage_plan"
         calls.clear()
         with patch("infra_manager.physical_host_operations.sys.stdin",
-                   io.StringIO('{"fingerprint":"' + 'a' * 64 + '"}\\n')):
+                   io.StringIO('{"fingerprint":"' + 'a' * 64 + '"}\n')):
             assert run_physical_host_operation(ROOT, "storage-prepare", "nas") == 0
         assert len(calls) == 1
         assert calls[0]["operation"] == "storage-prepare"
