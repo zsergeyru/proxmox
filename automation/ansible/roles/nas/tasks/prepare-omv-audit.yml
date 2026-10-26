@@ -6,9 +6,9 @@
   ansible.builtin.assert:
     that:
       - physical_host_name == 'nas'
-      - physical_disk_intent.mode == 'recover'
+      - physical_recovery_intent.mode == 'recover'
       - physical_recovery_journal is mapping
-      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
       - physical_recovery_ext4.results | length == 1
       - physical_recovery_guids.results | length == 2
       - physical_recovery_ext4.results[0].item.role == 'shared'
