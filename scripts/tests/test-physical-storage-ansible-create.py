@@ -184,6 +184,70 @@ def test_omv_recovery_audit_is_read_only() -> None:
     ] == ["physical_storage", "nas"]
 
 
+def test_omv_native_registration_is_safe_and_disconnected() -> None:
+    """OMV receives only new, verified filesystem records (not passwords or uuid)."""
+    role = read_omv_register()
+    source = (
+        ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
+    ).read_text(encoding="utf-8")
+    assert len(role) >= 10
+    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in source
+    assert "nas_omv_registration_authorized" in source
+    assert "physical_recovery_ext4.results | length == 1" in source
+    assert "physical_recovery_guids.results | length == 2" in source
+    assert "physical_preparation_saved" not in source
+    assert "nas_omv_registration_controller_state" in source
+    assert "nas_omv_registration_before.stdout | from_json" in source
+    command_tasks = [task for task in role if "ansible.builtin.command" in task]
+    writes = [
+        task for task in command_tasks
+        if task["ansible.builtin.command"]["argv"][1] == "update"
+    ]
+    assert len(writes) == 1
+    writer = writes[0]
+    assert writer["ansible.builtin.command"]["argv"][:3] == [
+        "omv-confdbadm", "update", "conf.system.filesystem.mountpoint",
+    ]
+    assert writer["when"] == (
+        "not (nas_omv_mountpoint_audit[item.role].exists | bool)"
+    )
+    assert writer["changed_when"] is True
+    assert writer["no_log"] is True
+    assert "entry | to_json" in writer["ansible.builtin.command"]["argv"][-1]
+    assert "'uuid'" not in writer["vars"]["entry"]
+    assert "physical_disk_intent" not in writer["vars"]["entry"]
+    for task in command_tasks:
+        argv = task["ansible.builtin.command"]["argv"]
+        assert argv[0] == "omv-confdbadm"
+        assert argv[1] in {"read", "update"}
+        if argv[1] == "read":
+            assert task["changed_when"] is False
+    for task in role:
+        assert not any(name in task for name in [
+            "ansible.builtin.shell", "ansible.builtin.raw",
+            "ansible.builtin.script", "ansible.builtin.mount",
+            "ansible.builtin.file", "ansible.builtin.copy",
+        ])
+    assert "nas_omv_registered.values() | list | unique | length == 3" in source
+    # Before controlled cutover, no runnable playbook or role calls this
+    # write-capable Ansible task file, even as an indirect include.
+    ansible = ROOT / "automation/ansible"
+    for folder in (ansible / "playbooks", ansible / "roles"):
+        for path in folder.rglob("*.yml"):
+            if path.name == "prepare-omv-register.yml":
+                continue
+            doc = path.read_text(encoding="utf-8")
+            assert "tasks_from: prepare-omv-register.yml" not in doc, path
+            assert "include_tasks: prepare-omv-register.yml" not in doc, path
+
+
+def read_omv_register() -> list:
+    name = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
+    content = yaml.safe_load(name.read_text(encoding="utf-8"))
+    assert isinstance(content, list)
+    return content
+
+
 def test_item_key_never_collides_with_dict_method() -> None:
     preflight = read("prepare-preflight.yml")
     journal = read("prepare-journal.yml")
@@ -205,4 +269,5 @@ if __name__ == "__main__":
     test_preserved_ext4_is_checked_without_writes()
     test_recovery_is_strictly_read_only()
     test_omv_recovery_audit_is_read_only()
+    test_omv_native_registration_is_safe_and_disconnected()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
