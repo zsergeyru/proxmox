@@ -112,5 +112,66 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
         bootstrap_physical_host(host, pve_node, payload)
         console.result("SSH-доверие физического сервера установлено через OpenBao")
         return 0
-    from .physical_host_drivers import run_host_driver
-    return run_host_driver(repo_root, operation, host)
+    # No dynamic Python driver and no service-specific branch in 910.
+    # Host-owned playbooks, phase order and status checks are Git data.
+    from .physical_host_ssh import PhysicalHostSshSession
+    from .physical_host_ansible import run_physical_ansible
+    from .physical_host_credentials import operator_status_sections
+    if host.engine != "ansible" or not host.phases:
+        raise InfraManagerError("Физический сервер не объявил Ansible workflow")
+    if not host.address or not host.ssh_host_fingerprint:
+        raise InfraManagerError(
+            "Для физического сервера нужен ранее подтверждённый SSH-ключ"
+        )
+    pve_node = os.environ.get("INFRA_PVE_NODE", "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}", pve_node):
+        raise InfraManagerError("Не определён доверенный PVE-узел для OpenBao SSH")
+    variables: dict[str, object] = {}
+    if operation == "storage-prepare":
+        payload = sys.stdin.readline(2048)
+        if not payload or len(payload) > 2047 or not payload.endswith("\n"):
+            raise InfraManagerError("Требуется подтверждение точного плана дисков")
+        try:
+            confirmation = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise InfraManagerError("Повреждено подтверждение дисков") from exc
+        if (not isinstance(confirmation, dict)
+                or set(confirmation) != {"fingerprint"}
+                or not isinstance(confirmation["fingerprint"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", confirmation["fingerprint"])):
+            raise InfraManagerError("Отпечаток плана дисков не подтверждён")
+        variables["physical_approved_fingerprint"] = confirmation["fingerprint"]
+        # PVE operator approval is a one-off transport flag, not a YAML choice.
+        variables["physical_disk_recreate_authorized"] = True
+    with PhysicalHostSshSession(host, pve_node) as session:
+        if operation in {"deploy", "repair"}:
+            for phase in host.phases:
+                run_physical_ansible(
+                    repo_root, session, variables=variables,
+                    operation="deploy", phase=phase, callback=host.callback,
+                )
+            run_physical_ansible(
+                repo_root, session, variables=variables,
+                operation="status", callback=host.callback,
+            )
+        elif operation == "status":
+            run_physical_ansible(
+                repo_root, session, variables=variables,
+                operation="status", callback=host.callback,
+            )
+        elif operation in {"storage-plan", "storage-prepare"}:
+            run_physical_ansible(
+                repo_root, session, variables=variables,
+                operation=operation,
+                callback="infra_storage_plan" if operation == "storage-plan"
+                else host.callback,
+            )
+        else:
+            raise InfraManagerError("Неизвестная декларативная операция сервера")
+    if operation in {"deploy", "repair", "status"}:
+        console.result(f"{host.name}: Ansible и status.yaml проверены")
+        operator_status_sections(
+            repo_root, host.name, host.address,
+            show_secrets=os.environ.get("INFRA_MANAGER_OPERATOR_SHOW_SECRETS") == "1",
+        )
+    return 0
