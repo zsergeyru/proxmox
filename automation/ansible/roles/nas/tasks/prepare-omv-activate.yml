@@ -62,7 +62,7 @@
     follow: false
   register: nas_omv_activate_ext4_directory
 
-- name: Создать только отсутствующий проверенный пустой каталог ext4
+- name: Создать только отсутствующий и ранее проверенный каталог ext4
   ansible.builtin.file:
     path: "{{ nas_omv_expected_mounts[0].dir }}"
     state: directory
@@ -73,114 +73,9 @@
   when:
     - nas_omv_activate_before.results[0].rc == 1
     - not (nas_omv_activate_ext4_directory.stat.exists | default(false))
-    - nas_omv_expected_mounts[0].dir is match('^/srv/dev-disk-by-uuid-[a-fA-F0-9-]{16,40}
-    that:
-      - not (nas_omv_activate_ext4_directory.stat.islnk | default(false))
-      - >-
-        (nas_omv_activate_before.results[0].rc == 0) or
-        (
-          nas_omv_activate_ext4_directory.stat.exists | default(false)
-          and nas_omv_activate_ext4_directory.stat.isdir | default(false)
-        )
-    fail_msg: Цель ext4 не существует, является ссылкой или неожиданным объектом
+    - nas_omv_expected_mounts[0].dir is match('^/srv/dev-disk-by-uuid-[a-fA-F0-9-]{16,40}$')
 
-- name: Проверить отсутствие скрытых файлов в отключённом ext4-каталоге
-  ansible.builtin.find:
-    paths: "{{ nas_omv_expected_mounts[0].dir }}"
-    file_type: any
-    hidden: true
-    recurse: false
-  register: nas_omv_activate_ext4_contents
-  when: nas_omv_activate_before.results[0].rc == 1
-
-- name: Отказать в подключении поверх существующих данных
-  ansible.builtin.assert:
-    that:
-      - >-
-        (nas_omv_activate_before.results[0].rc == 0) or
-        (nas_omv_activate_ext4_contents.matched | default(1) | int == 0)
-    fail_msg: Каталог назначения ext4 не пуст; подключение запрещено
-
-- name: Применить OMV fstab только если регистрация изменена или ext4 не подключён
-  ansible.builtin.command:
-    argv: [omv-salt, deploy, run, fstab]
-  when: >-
-    (nas_omv_registration_changes is changed)
-    or nas_omv_activate_before.results[0].rc == 1
-  register: nas_omv_activate_fstab
-  changed_when: true
-  no_log: true
-
-- name: Проверить текущее состояние ext4 после штатного OMV deploy
-  ansible.builtin.command:
-    argv: [findmnt, --json, --mountpoint, "{{ nas_omv_expected_mounts[0].dir }}", --output, TARGET,SOURCE,FSTYPE,UUID]
-  register: nas_omv_activate_ext4_after
-  changed_when: false
-  failed_when: false
-
-- name: Разрешить только правильный ext4 UUID после OMV
-  ansible.builtin.assert:
-    that:
-      - nas_omv_activate_ext4_after.rc in [0, 1]
-      - >-
-        nas_omv_activate_ext4_after.rc == 1 or
-        (
-          mounted | length == 1
-          and mounted[0].target == nas_omv_expected_mounts[0].dir
-          and mounted[0].fstype == 'ext4'
-          and mounted[0].uuid == physical_recovery_ext4.results[0].stdout | trim
-        )
-    fail_msg: OMV подключила неправильный ext4; дальнейшая запись запрещена
-  vars:
-    mounted: >-
-      {{ (nas_omv_activate_ext4_after.stdout | from_json).filesystems
-         | default([]) if nas_omv_activate_ext4_after.rc == 0 else [] }}
-
-# If OMV only updated fstab, mounting by its exact, verified target is
-# allowed after comparing the fstab source to the previously proven UUID.
-- name: Прочитать только запись fstab для отсутствующего ext4
-  ansible.builtin.command:
-    argv:
-      - findmnt
-      - --fstab
-      - --mountpoint
-      - "{{ nas_omv_expected_mounts[0].dir }}"
-      - --noheadings
-      - --output
-      - SOURCE,FSTYPE
-  when: nas_omv_activate_ext4_after.rc == 1
-  register: nas_omv_activate_declared_ext4
-  changed_when: false
-
-- name: Подтвердить безопасный источник ext4 из fstab
-  ansible.builtin.assert:
-    that:
-      - >-
-        nas_omv_activate_ext4_after.rc == 0 or
-        (
-          nas_omv_activate_declared_ext4.stdout_lines | length == 1
-          and (
-            nas_omv_activate_declared_ext4.stdout_lines[0].split()[0]
-            in [
-              'UUID=' ~ (physical_recovery_ext4.results[0].stdout | trim),
-              nas_omv_expected_mounts[0].fsname
-            ]
-          )
-          and nas_omv_activate_declared_ext4.stdout_lines[0].split()[-1] == 'ext4'
-        )
-    fail_msg: OMV fstab не содержит единственный подтверждённый ext4
-
-- name: Подключить лишь подтверждённый ext4 через ранее проверенную fstab
-  ansible.builtin.command:
-    argv: [mount, "{{ nas_omv_expected_mounts[0].dir }}"]
-  when: nas_omv_activate_ext4_after.rc == 1
-  changed_when: true
-
-- name: Независимо проверить все смонтированные UUID/GUID после активации
-  ansible.builtin.include_tasks: prepare-omv-verify.yml
-)
-
-- name: Повторно проверить тип целевого каталога ext4 после подготовки
+- name: Повторно проверить каталог, если его пришлось создать
   ansible.builtin.stat:
     path: "{{ nas_omv_expected_mounts[0].dir }}"
     follow: false
