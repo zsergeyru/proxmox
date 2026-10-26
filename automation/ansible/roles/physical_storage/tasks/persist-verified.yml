@@ -78,13 +78,35 @@
   become: false
   register: physical_state_directory
 
+- name: Разрешить ссылку только на постоянный каталог physical-hosts
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, /var/lib/infra-manager/physical-hosts]
+  delegate_to: localhost
+  become: false
+  register: physical_state_canonical_path
+  changed_when: false
+  when: physical_state_directory.stat.islnk | default(false)
+
+- name: Проверить реальные права целевого каталога без доверия к ссылкам
+  ansible.builtin.stat:
+    path: /var/lib/infra-manager/physical-hosts
+    follow: true
+  delegate_to: localhost
+  become: false
+  register: physical_state_real_directory
+
 - name: Отказаться сохранять данные в незнакомый каталог
   ansible.builtin.assert:
     that:
-      - physical_state_directory.stat.isdir | default(false)
-      - not (physical_state_directory.stat.islnk | default(false))
-      - physical_state_directory.stat.mode in ['0700', '0750']
-    fail_msg: Нет защищённого каталога physical-hosts управляющего гостя
+      - physical_state_real_directory.stat.isdir | default(false)
+      - physical_state_real_directory.stat.mode in ['0700', '0750']
+      - >-
+        not (physical_state_directory.stat.islnk | default(false))
+        or (
+          physical_state_canonical_path.stdout | default('') ==
+          '/mnt/persistent-state/physical-hosts'
+        )
+    fail_msg: physical-hosts не является разрешённым постоянным каталогом управляющего гостя
 
 - name: Проверить защищённую запись доверенного SSH-ключа контроллера
   ansible.builtin.stat:
