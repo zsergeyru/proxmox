@@ -1,0 +1,21 @@
+---
+# NAS-only, read-only recovery validation. Ansible never re-creates disks here.
+- name: Проверить прерванную подготовку NAS и отсутствие конфликтов OMV
+  hosts: nas
+  gather_facts: false
+  become: false
+  vars:
+    physical_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
+         | from_yaml }}
+  tasks:
+    - name: Сверить старый журнал и фактические ext4/ZFS
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: prepare-recover-inspect.yml
+
+    - name: Проверить записи OMV без их изменения
+      ansible.builtin.include_role:
+        name: nas
+        tasks_from: prepare-omv-audit.yml
