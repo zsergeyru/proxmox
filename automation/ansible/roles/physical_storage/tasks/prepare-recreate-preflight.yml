@@ -1,0 +1,118 @@
+---
+# Read-only gate for user-approved ONE-TIME recreation of data disks.
+# A plan does not grant permission to wipe: both exact fingerprint and explicit
+# PVE confirmation are required later. Deliberately contains NO write tasks.
+- name: Require exactly approved one-time data-disk policy
+  ansible.builtin.assert:
+    that:
+      - physical_storage.initialization is mapping
+      - physical_storage.initialization.require_exact_device_confirmation | bool
+      - physical_storage.initialization.recreate_once | sort == ['backup', 'data', 'shared']
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_disk_intent is mapping
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.schema_version == 1
+      - physical_disk_intent.mode == 'recreate-once'
+      - physical_disk_intent.fingerprint is match('^[0-9a-f]{64}$')
+      - physical_disk_intent['items'] | length == 3
+      - physical_disk_intent['items'] | map(attribute='role') | list | sort == physical_storage.initialization.recreate_once | sort
+      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == 3
+      - physical_disk_recreate_authorized | default(false) | bool
+    fail_msg: Only an explicitly approved plan for the three data disks is allowed
+
+- name: Refuse any system or undeclared disk in the approved plan
+  ansible.builtin.assert:
+    that:
+      - expected | length == 1
+      - expected[0].id != 'system'
+      - expected[0].role not in ['system', 'unused']
+      - item.serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - expected[0].serial is none or expected[0].serial == item.serial
+      - item.keys() | list | sort == ['action', 'role', 'serial']
+      - item.action == 'recreate'
+    fail_msg: A system, unverified or unexpectedly assigned disk was requested
+  vars:
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Inspect physical disks with the common read-only Ansible role
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: inspect.yml
+
+- name: Read disk tree and root filesystem without modifying storage
+  ansible.builtin.command:
+    argv: [lsblk, --json, --tree, --bytes, --output, NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS]
+  register: physical_recreate_tree
+  changed_when: false
+
+- name: Identify the unique actual system disk using the root filesystem
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 1'
+    stdin: "{{ physical_recreate_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+
+- name: Store observed physical disks without guessing /dev/sdX ordering
+  ansible.builtin.set_fact:
+    physical_recreate_actual: >-
+      {{ (physical_recreate_tree.stdout | from_json).blockdevices
+         | selectattr('type', 'equalto', 'disk') | list }}
+
+- name: Verify exact model, capacity, serial, and exclusion of the root disk
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - expected | length == 1
+      - actual[0].model is string
+      - expected[0].model | lower in actual[0].model | lower
+      - actual[0].size | int >= (expected[0].capacity_gb | int) * 950000000
+      - actual[0].size | int <= (expected[0].capacity_gb | int) * 1050000000
+      - root_mounts | length == 0
+    fail_msg: The approved disk identity changed or the OS disk was selected
+  vars:
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+    actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
+    root_mounts: >-
+      {{ actual[0].mountpoints | default([], true) | select('equalto', '/') | list
+         if actual | length == 1 else ['/'] }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Refuse a completed previous disk assignment on the controller
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_recreate_previous_state
+  delegate_to: localhost
+  become: false
+
+- name: Never reinitialize a previously confirmed disk
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_state.stat.exists | default(false))
+      - not (physical_recreate_previous_state.stat.islnk | default(false))
+    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
+
+- name: Refuse an interrupted preparation journal
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_recreate_previous_journal
+
+- name: Refuse repeat destruction after a previous partial run
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_journal.stat.exists | default(false))
+      - not (physical_recreate_previous_journal.stat.islnk | default(false))
+    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
+
+- name: Explain eligibility, without clearing or unmounting any disks
+  ansible.builtin.debug:
+    msg: Exact data disks and policy checked; no filesystem was changed
