@@ -117,6 +117,10 @@ jobs:
             ansible-playbook --syntax-check \
               -i localhost, -c local \
               scripts/tests/fixtures/physical-storage-staged-syntax.yml
+          ANSIBLE_ROLES_PATH=automation/ansible/roles \
+            ansible-playbook -i localhost, -c local \
+              scripts/tests/fixtures/physical-storage-intent-smoke.yml \
+              -e '{"physical_disk_intent":{"mode":"first-create","fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"role":"shared","serial":"TEST-A","action":"create-ext4"},{"role":"data","serial":"TEST-B","action":"create-zfs"},{"role":"backup","serial":"TEST-C","action":"create-zfs"}]}}'
 
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
