@@ -138,14 +138,27 @@ def test_cli() -> None:
 
     parser = build_parser()
     for argv, command in (
-        (["hosts"], "hosts"),
-        (["inspect", "nas"], "inspect"),
+        (["deploy", "nas", "--_physical_stage", "plan"], "deploy"),
         (["status", "nas"], "status"),
         (["deploy", "nas"], "deploy"),
         (["deploy", "910"], "deploy"),
         (["repair", "140"], "repair"),
     ):
         assert parser.parse_args(argv).command == command
+
+    # Inspect and disk planning are mandatory internal phases of deploy,
+    # not separately callable infra-manager commands.
+    for legacy in ("hosts", "inspect", "storage-plan", "storage-prepare"):
+        try:
+            parser.parse_args([legacy, "nas"])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("Standalone command reintroduced: " + legacy)
+    for step in ("plan", "prepare"):
+        args = parser.parse_args(["deploy", "nas", "--_physical_stage", step])
+        assert args.command == "deploy"
+        assert args._physical_stage == step
 
 
 def main() -> int:

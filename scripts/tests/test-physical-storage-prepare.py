@@ -94,7 +94,7 @@ def test_confirmation():
             patch("builtins.input", return_value=response),
         ):
             refuses(lambda: confirm_nas_storage("nas", forward, RuntimeError), RuntimeError)
-        assert all(command[0][0] != "storage-prepare" for command in responses)
+        assert all(command[0] != ["deploy", "nas", "--_physical_stage", "prepare"] for command in responses)
 
     responses.clear()
     with (
@@ -103,7 +103,7 @@ def test_confirmation():
         patch("builtins.input", return_value=" ДА "),
     ):
         assert confirm_nas_storage("nas", forward, RuntimeError) == 0
-    assert responses[-1][0] == ["storage-prepare", "nas"]
+    assert responses[-1][0] == ["deploy", "nas", "--_physical_stage", "prepare"]
     assert json.loads(responses[-1][1]) == {"fingerprint": plan.fingerprint}
 
 
@@ -151,7 +151,7 @@ def test_existing_shared_confirmation() -> None:
     assert "НЕ ФОРМАТИРУЕТСЯ" in shown
     assert "ZFS-A" in shown and "ZFS-B" in shown
     assert "/dev/sdc" in shown and "разделов: 0" in shown
-    assert calls[-1][0] == ["storage-prepare", "nas"]
+    assert calls[-1][0] == ["deploy", "nas", "--_physical_stage", "prepare"]
     assert json.loads(calls[-1][1]) == {"fingerprint": plan.fingerprint}
 
 
@@ -182,7 +182,7 @@ def test_missing_disk_state_blocks_approval() -> None:
         patch("builtins.input", side_effect=AssertionError("Нельзя просить подтверждение")),
     ):
         refuses(lambda: confirm_nas_storage("nas", forward, RuntimeError), RuntimeError)
-    assert ["storage-prepare", "nas"] not in calls
+    assert ["deploy", "nas", "--_physical_stage", "prepare"] not in calls
 
 
 def test_storage_state():
@@ -700,7 +700,7 @@ def test_pending_recovery_is_auto_dispatched_without_format_prompt() -> None:
         patch("builtins.input", side_effect=AssertionError("Нельзя снова спрашивать о форматировании")),
     ):
         assert confirm_nas_storage("nas", forward, RuntimeError) == 0
-    assert calls[-1][0] == ["storage-prepare", "nas"]
+    assert calls[-1][0] == ["deploy", "nas", "--_physical_stage", "prepare"]
     assert json.loads(calls[-1][1]) == {
         "fingerprint": first_plan.fingerprint
     }
