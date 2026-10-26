@@ -1,0 +1,15 @@
+---
+# Read-only plan. The PVE operator invokes this INSIDE infra-manager deploy.
+- name: Составить декларативный план физических HDD, без изменений на NAS
+  hosts: nas
+  gather_facts: false
+  become: false
+  vars:
+    physical_storage: >-
+      {{ lookup('ansible.builtin.file',
+         playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml') | from_yaml }}
+  tasks:
+    - name: Проверить и показать план без форматирования
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: plan.yml

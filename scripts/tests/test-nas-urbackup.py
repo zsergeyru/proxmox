@@ -206,12 +206,12 @@ def test_docker_and_deploy_contract():
     unit = (folder / "roles/nas/templates/nas-urbackup.service.j2").read_text()
     assert "ExecStartPre=" in unit and "nas-urbackup-safe preflight" in unit
     assert "RequiresMountsFor=" in unit
-    operations = (
-        ROOT / "scripts/infra-manager/drivers/omv8.py"
-    ).read_text()
-    assert "run_nas_phase(" in operations
-    assert "configure_nas_backups(" not in operations
-    assert "load_nas_backup_policy" in operations
+    deployment = yaml.safe_load(
+        (folder / "playbooks/deploy-nas.yml").read_text()
+    )
+    assert "nas_backup_policy" in str(deployment[0]["vars"])
+    assert "nas_backup_policy" in str(deployment)
+    assert "configure_nas_backups(" not in str(deployment)
     playbook = (folder / "roles/nas/tasks/urbackup_server.yml").read_text()
     assert 'group: nas-urbackup' in playbook
     assert 'mode: "0710"' in playbook

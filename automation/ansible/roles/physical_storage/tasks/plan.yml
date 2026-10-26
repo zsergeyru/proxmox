@@ -1,0 +1,121 @@
+---
+# Read-only, generic host disk plan for the operator's one deploy command.
+# Each hardware role is selected from verified model/capacity/serial; the
+# unique mounted OS root is excluded from all non-system assignments.
+- name: Обследовать физические устройства без записи
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: inspect.yml
+
+- name: Найти корневой SSD по полной иерархии разделов
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - -r
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/")) | .serial] | if length == 1 then .[0] else empty end'
+    stdin: "{{ physical_lsblk.stdout }}"
+    stdin_add_newline: false
+  register: physical_plan_root
+  changed_when: false
+
+- name: Запретить неидентифицируемый системный SSD
+  ansible.builtin.assert:
+    that:
+      - physical_plan_root.stdout | trim is match('^[A-Za-z0-9._:-]{1,128}$')
+      - physical_actual_disks | map(attribute='serial') | list | unique | length == physical_actual_disks | length
+      - physical_actual_disks | length == physical_storage.devices | length
+    fail_msg: Нельзя однозначно определить системный SSD и состав HDD
+
+- name: Проверить прошлое защищённое назначение на 910
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_plan_previous
+
+- name: Остановить план при неожиданной ссылке или доступе к старому состоянию
+  ansible.builtin.assert:
+    that:
+      - not (physical_plan_previous.stat.islnk | default(false))
+      - >-
+        not (physical_plan_previous.stat.exists | default(false))
+        or (
+          physical_plan_previous.stat.isreg | default(false)
+          and physical_plan_previous.stat.mode == '0600'
+        )
+    fail_msg: Ранее закреплённое состояние дисков повреждено
+
+- name: Независимо перепроверить подтверждённые UUID/GUID при повторном запуске
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: verified.yml
+  when: physical_plan_previous.stat.exists | default(false)
+
+- name: Найти журнал ранее начатой подготовки
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_plan_previous_journal
+
+- name: Запретить повторную очистку при неоконченном старом журнале
+  ansible.builtin.assert:
+    that:
+      - >-
+        (physical_plan_previous.stat.exists | default(false)) or
+        not (physical_plan_previous_journal.stat.exists | default(false))
+      - not (physical_plan_previous_journal.stat.islnk | default(false))
+    fail_msg: Старый журнал требует проверки восстановления; новый формат запрещён
+
+- name: Подготовить детерминированное распределение физических дисков
+  ansible.builtin.set_fact:
+    physical_plan_available: "{{ physical_actual_disks }}"
+    physical_plan_assignments: []
+    physical_plan_fingerprint_items: []
+    physical_plan_layout_ready: true
+
+- name: Назначить каждую роль только уникальному проверенному физическому диску
+  ansible.builtin.include_tasks: plan-assign.yml
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    loop_var: declared_disk
+    label: "{{ declared_disk.role }}"
+
+- name: Запретить неопознанные диски, повторы или несовпадение назначения SSD
+  ansible.builtin.assert:
+    that:
+      - physical_plan_available | length == 0
+      - physical_plan_assignments | length == physical_storage.devices | length
+      - physical_plan_assignments | map(attribute='serial') | unique | list | length == physical_plan_assignments | length
+      - physical_plan_assignments | selectattr('role', 'equalto', 'system') | map(attribute='serial') | first == physical_plan_root.stdout | trim
+      - physical_plan_assignments[0].role == 'system'
+    fail_msg: Невозможно подтвердить полное назначение накопителей
+
+- name: Не пересоздавать уже правильно размеченные и проверяемые ext4/ZFS
+  ansible.builtin.set_fact:
+    physical_plan_assignments: >-
+      {{ physical_plan_assignments | map('combine', {'action': 'preserve'}) | list }}
+    physical_plan_fingerprint_items: >-
+      {{ physical_plan_fingerprint_items | map('combine', {'action': 'preserve'}) | list }}
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_layout_ready | bool
+
+- name: Вычислить неизменный отпечаток физического плана
+  ansible.builtin.set_fact:
+    physical_plan_fingerprint: >-
+      {{ (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
+
+- name: Опубликовать план только через allowlisted stdout callback
+  ansible.builtin.debug:
+    msg: >-
+      PHYSICAL_STORAGE_PLAN_JSON={{ {
+        'host': physical_host_name,
+        'fingerprint': physical_plan_fingerprint,
+        'requires_creation': (
+          physical_plan_assignments | rejectattr('action', 'equalto', 'preserve') | list | length > 0
+        ),
+        'recovery_fingerprint': none,
+        'items': physical_plan_assignments
+      } | to_json }}

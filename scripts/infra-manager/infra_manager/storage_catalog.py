@@ -98,6 +98,23 @@ def validate_storage(
     devices = document["devices"]
     volumes = document["volumes"]
     mounts = document["mounts"]
+    # First initialization may re-create explicitly approved data disks, but
+    # never the OS disk, unknown media, or implicitly every detected disk.
+    # Confirmation and actual wiping are separate, fail-closed Ansible steps.
+    initialization = document.get("initialization")
+    if initialization is not None:
+        requested = set(initialization["recreate_once"])
+        targets = {item["id"] for item in devices
+                   if item["role"] not in {"system", "unused"}}
+        if not requested or not requested <= targets:
+            raise InfraManagerError(
+                f"{path}: первоначальная очистка может затрагивать "
+                "только явно перечисленные диски данных"
+            )
+        if initialization["require_exact_device_confirmation"] is not True:
+            raise InfraManagerError(
+                f"{path}: подготовка дисков требует подтверждения точных устройств"
+            )
     if sum(device["role"] == "system" for device in devices) != 1:
         raise InfraManagerError(f"{path}: нужен ровно один системный диск")
     for field in ("id", "serial", "by_id"):

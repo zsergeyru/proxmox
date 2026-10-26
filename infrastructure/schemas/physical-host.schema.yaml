@@ -23,11 +23,23 @@ properties:
   management:
     type: object
     additionalProperties: false
-    required: [driver]
+    required: [engine, phases, callback]
     properties:
-      driver:
-        type: string
-        pattern: '^[a-z][a-z0-9-]*$'
+      engine:
+        const: ansible
+      phases:
+        type: array
+        minItems: 1
+        maxItems: 8
+        uniqueItems: true
+        items:
+          type: string
+          pattern: '^[a-z][a-z0-9-]*$'
+      callback:
+        oneOf:
+          - type: 'null'
+          - type: string
+            pattern: '^[a-z][a-z0-9_]*$'
   connection:
     type: object
     additionalProperties: false

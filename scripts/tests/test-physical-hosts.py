@@ -24,7 +24,9 @@ def check_contract() -> None:
     assert "nas" in {host.name for host in hosts}
     nas = load_physical_host(ROOT, "nas")
     assert nas.address == "192.168.1.12"
-    assert nas.driver == "omv8"
+    assert nas.engine == "ansible"
+    assert nas.phases == ("base", "services")
+    assert nas.callback == "infra_nas_compact"
     assert nas.ssh_host_fingerprint is None
     assert [item["role"] for item in nas.devices] == [
         "system", "shared", "data", "backup"
@@ -74,6 +76,21 @@ def check_disk_identity() -> None:
         write(host_data, storage_data)
         assert len(load_physical_host(root, "nas").devices) == 4
 
+        # The one-time reinitialization policy MUST NOT be able to select
+        # the installed OS disk or any unknown physical disk.
+        for forbidden in ("system", "unknown", "unused"):
+            policy = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
+            policy["initialization"]["recreate_once"] = ["data", forbidden]
+            write(host_data, policy)
+            try:
+                load_physical_host(root, "nas")
+            except InfraManagerError:
+                pass
+            else:
+                raise AssertionError(
+                    "Unsafe one-time recreation target accepted: " + forbidden
+                )
+        write(host_data, storage_data)
         duplicate = yaml.safe_load(storage_target.read_text(encoding="utf-8"))
         duplicate["devices"][1]["serial"] = "DUPLICATE"
         duplicate["devices"][2]["serial"] = "DUPLICATE"

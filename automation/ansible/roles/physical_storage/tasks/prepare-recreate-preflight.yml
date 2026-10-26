@@ -1,0 +1,189 @@
+---
+# Only admission checks for future single-use recreation of data disks.
+# This role never unmounts, erases, partitions, formats, or imports pools.
+- name: Проверить разрешённые роли и подтверждённый план HDD
+  ansible.builtin.assert:
+    that:
+      - physical_storage.initialization is mapping
+      - physical_storage.initialization.require_exact_device_confirmation | bool
+      - physical_storage.initialization.recreate_once | length > 0
+      - physical_disk_intent is mapping
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.schema_version == 1
+      - physical_disk_intent.mode == 'recreate-once'
+      - physical_disk_intent.fingerprint is match('^[0-9a-f]{64}$')
+      - physical_disk_intent['items'] | length == physical_storage.initialization.recreate_once | length
+      - physical_disk_intent['items'] | map(attribute='role') | list | sort == physical_storage.initialization.recreate_once | sort
+      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == physical_disk_intent['items'] | length
+      - physical_disk_recreate_authorized | default(false) | bool
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+    fail_msg: Нет разрешённого точного плана очистки HDD
+
+- name: Запретить очистку системы, неизвестных ролей и дисков
+  ansible.builtin.assert:
+    that:
+      - item.keys() | list | sort == ['action', 'role', 'serial']
+      - item.action == 'recreate'
+      - item.serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - expected | length == 1
+      - expected[0].role not in ['system', 'unused']
+      - expected[0].serial is none or expected[0].serial == item.serial
+    fail_msg: Неизвестный или системный диск не может быть очищен
+  vars:
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сверить общую декларацию и фактические диски без записи
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: inspect.yml
+
+- name: Получить дерево накопителей со всеми дочерними разделами
+  ansible.builtin.command:
+    argv: [lsblk, --json, --tree, --bytes, --output, 'NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS']
+  register: physical_recreate_tree
+  changed_when: false
+
+- name: Найти системную ФС и потребовать ровно один корневой SSD
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - '[.blockdevices[] | select(.type=="disk") | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 1'
+    stdin: "{{ physical_recreate_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+
+- name: Зафиксировать фактические устройства только в памяти Ansible
+  ansible.builtin.set_fact:
+    physical_recreate_actual: >-
+      {{ (physical_recreate_tree.stdout | from_json).blockdevices
+         | selectattr('type', 'equalto', 'disk') | list }}
+
+- name: Подтвердить серийный номер, модель и размер каждого HDD
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - expected | length == 1
+      - actual[0].model is string
+      - expected[0].model | lower in actual[0].model | lower
+      - actual[0].size | int >= (expected[0].capacity_gb | int) * 950000000
+      - actual[0].size | int <= (expected[0].capacity_gb | int) * 1050000000
+    fail_msg: Идентичность HDD изменена относительно подтверждённого плана
+  vars:
+    actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Доказать, что выбранный диск не содержит корневой раздел даже внутри LVM
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_recreate_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Найти устойчивые ссылки by-id только на целые HDD
+  ansible.builtin.find:
+    paths: /dev/disk/by-id
+    file_type: link
+    recurse: false
+    patterns: ['ata-*', 'scsi-*']
+  register: physical_recreate_links
+
+- name: Разрешить только ссылки, содержащие серийный номер HDD
+  ansible.builtin.assert:
+    that:
+      - aliases | length > 0
+    fail_msg: Не найдена постоянная ссылка для подтверждённого HDD
+  vars:
+    aliases: >-
+      {{ physical_recreate_links.files | selectattr('path', 'search', item.serial)
+         | rejectattr('path', 'search', '-part[0-9]+$') | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Разрешить настоящие устройства за ссылками by-id
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, "{{ item.path }}"]
+  register: physical_recreate_resolved
+  changed_when: false
+  loop: >-
+    {{ physical_recreate_links.files
+       | rejectattr('path', 'search', '-part[0-9]+$') | list }}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Сверить цели ссылок с ранее проверенным настоящим устройством
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - aliases | length > 0
+      - aliases | rejectattr('stdout', 'equalto', actual[0].path) | list | length == 0
+    fail_msg: Ссылка by-id указывает на чужой накопитель
+  vars:
+    actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
+    aliases: >-
+      {{ physical_recreate_resolved.results
+         | selectattr('item.path', 'search', item.serial) | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Сохранить проверенные by-id только для текущего запуска
+  ansible.builtin.set_fact:
+    physical_recreate_by_id: >-
+      {{ (physical_recreate_by_id | default({}))
+         | combine({item.role: (aliases | first).item.path}) }}
+  vars:
+    aliases: >-
+      {{ physical_recreate_resolved.results
+         | selectattr('item.path', 'search', item.serial) | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить отсутствие подтверждённого состояния на контроллере
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_recreate_previous_state
+  delegate_to: localhost
+  become: false
+
+- name: Отказать в повторном пересоздании уже закреплённых томов
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_state.stat.exists | default(false))
+      - not (physical_recreate_previous_state.stat.islnk | default(false))
+    fail_msg: UUID/GUID уже подтверждены; повторное форматирование запрещено
+
+- name: Проверить отсутствие журнала предыдущей подготовки
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_recreate_previous_journal
+
+- name: Отказать в повторной очистке после незавершённой попытки
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_journal.stat.exists | default(false))
+      - not (physical_recreate_previous_journal.stat.islnk | default(false))
+    fail_msg: Обнаружен прежний журнал; требуется восстановление, не повторная очистка
+
+- name: Подтвердить только готовность к подготовке, не выполнять запись на HDD
+  ansible.builtin.debug:
+    msg: Сверены роли, физические диски и безопасные пути; очистка не выполнялась

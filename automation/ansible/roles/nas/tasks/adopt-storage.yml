@@ -1,0 +1,192 @@
+---
+# Non-destructive adoption of existing, correctly formatted HDDs.
+# No mkfs, sgdisk, wipefs, zpool create/export/destroy or mount.
+- name: Разрешить принятие только полного наблюдаемого состава ext4/ZFS
+  ansible.builtin.assert:
+    that:
+      - physical_plan_assignments | length == 4
+      - physical_plan_assignments | map(attribute='action') | unique | list == ['preserve']
+      - not (physical_plan_previous.stat.exists | default(false))
+      - physical_plan_layout_ready | bool
+      - physical_storage.host == physical_host_name
+      - physical_approved_fingerprint == physical_plan_fingerprint
+      - physical_plan_root.stdout | trim is match('^[A-Za-z0-9._:-]{1,128}$')
+    fail_msg: Не доказана существующая разметка; принятие томов запрещено
+
+- name: Найти существующий раздел ext4 на подтверждённом HDD
+  ansible.builtin.set_fact:
+    nas_adopt_shared_disk: >-
+      {{ physical_actual_disks
+         | selectattr('serial', 'equalto',
+           (physical_plan_assignments | selectattr('role', 'equalto', 'shared') | first).serial)
+         | first }}
+
+- name: Проверить единственный ext4-раздел и UUID
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_shared_disk.children | default([], true) | length == 1
+      - nas_adopt_shared_disk.children[0].type == 'part'
+      - nas_adopt_shared_disk.children[0].fstype == 'ext4'
+      - nas_adopt_shared_disk.children[0].uuid is match('^[a-fA-F0-9-]{16,40}$')
+      - nas_adopt_shared_disk.pttype == 'gpt'
+    fail_msg: Общий HDD не является подтверждённым ext4
+
+- name: Проверить реальный ext4 mount по проверенному UUID
+  ansible.builtin.command:
+    argv: [findmnt, --json, --source, "UUID={{ nas_adopt_shared_disk.children[0].uuid }}", --output, TARGET,SOURCE,FSTYPE,UUID]
+  register: nas_adopt_shared_mount
+  changed_when: false
+
+- name: Запретить неизвестную точку подключения ext4
+  ansible.builtin.assert:
+    that:
+      - mounts | length == 1
+      - mounts[0].target == '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid
+      - mounts[0].fstype == 'ext4'
+      - mounts[0].uuid == nas_adopt_shared_disk.children[0].uuid
+    fail_msg: Ext4 отсутствует или смонтирован в чужой каталог
+  vars:
+    mounts: "{{ (nas_adopt_shared_mount.stdout | from_json).filesystems | default([]) }}"
+
+- name: Прочитать владельцев двух ZFS-пулов без изменения
+  ansible.builtin.command:
+    argv: [zpool, status, -P, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: nas_adopt_zfs_members
+  changed_when: false
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Подтвердить ONLINE и уникальный HDD в каждом ZFS
+  ansible.builtin.assert:
+    that:
+      - item.stdout is search('(?m)^\\s*state: ONLINE\\s*$')
+      - "'pool: ' ~ item.item.pool in item.stdout"
+      - serial | length > 0
+      - serial in item.stdout
+    fail_msg: ZFS-пул {{ item.item.pool }} принадлежит чужому диску или не ONLINE
+  vars:
+    serial: >-
+      {{ (physical_plan_assignments
+          | selectattr('role', 'equalto', item.item.id) | first).serial }}
+  loop: "{{ nas_adopt_zfs_members.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Проверить реальные точки подключения ZFS
+  ansible.builtin.command:
+    argv: [findmnt, --json, --mountpoint, "/{{ item.pool }}", --output, TARGET,SOURCE,FSTYPE]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: nas_adopt_zfs_mounts
+  changed_when: false
+
+- name: Отказать при замене пула или чужом монтировании
+  ansible.builtin.assert:
+    that:
+      - mounts | length == 1
+      - mounts[0].target == '/' ~ item.item.pool
+      - mounts[0].fstype == 'zfs'
+      - mounts[0].source.split('/')[0] == item.item.pool
+    fail_msg: Пул {{ item.item.pool }} не подтверждён по каталогу
+  vars:
+    mounts: "{{ (item.stdout | from_json).filesystems | default([]) }}"
+  loop: "{{ nas_adopt_zfs_mounts.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Прочитать настоящие GUID ZFS-пулов
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: nas_adopt_zfs_guids
+  changed_when: false
+
+- name: Проверить, что GUID независимы и корректны
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_zfs_guids.results | length == 2
+      - nas_adopt_zfs_guids.results | map(attribute='stdout') | unique | list | length == 2
+      - item.stdout | trim is match('^[0-9]{1,20}$')
+    fail_msg: Нельзя доказать неизменность ZFS GUID
+  loop: "{{ nas_adopt_zfs_guids.results }}"
+  loop_control:
+    label: "{{ item.item.pool }}"
+
+- name: Сформировать ровно один ожидаемый ext4 mount OMV
+  ansible.builtin.set_fact:
+    nas_omv_expected_mounts:
+      - role: shared
+        fsname: "/dev/disk/by-uuid/{{ nas_adopt_shared_disk.children[0].uuid }}"
+        dir: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+        type: ext4
+
+- name: Дополнить точными источниками ZFS из YAML
+  ansible.builtin.set_fact:
+    nas_omv_expected_mounts: >-
+      {{ nas_omv_expected_mounts + [{
+        'role': item.id, 'fsname': item.pool,
+        'dir': '/' ~ item.pool, 'type': 'zfs'
+      }] }}
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Зарегистрировать только доказанные существующие ФС в OMV
+  ansible.builtin.include_tasks: adopt-omv.yml
+
+- name: Построить подтверждённые тома для постоянного состояния 910
+  ansible.builtin.set_fact:
+    physical_observed_volumes:
+      shared:
+        mountpoint: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+        filesystem_uuid: "{{ nas_adopt_shared_disk.children[0].uuid }}"
+        omv_reference: "{{ nas_omv_registered.shared }}"
+
+- name: Дополнить подтверждённые ZFS GUID и UUID OMV
+  ansible.builtin.set_fact:
+    physical_observed_volumes: >-
+      {{ physical_observed_volumes | combine({
+        item.item.id: {
+          'pool': item.item.pool,
+          'pool_guid': item.stdout | trim,
+          'mountpoint': '/' ~ item.item.pool,
+          'omv_reference': nas_omv_registered[item.item.id]
+        }
+      }) }}
+  loop: "{{ nas_adopt_zfs_guids.results }}"
+  loop_control:
+    label: "{{ item.item.id }}"
+
+- name: Сформировать подтверждённую идентичность всех четырёх дисков
+  ansible.builtin.set_fact:
+    physical_observed_devices: []
+
+- name: Добавить проверенные serial к декларации без изменения Git
+  ansible.builtin.set_fact:
+    physical_observed_devices: >-
+      {{ physical_observed_devices + [
+        item | combine({
+          'serial': (physical_plan_assignments
+            | selectattr('role', 'equalto', item.role) | first).serial
+        })
+      ] }}
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Неизменяемое фактическое состояние для записи контроллером
+  ansible.builtin.set_fact:
+    physical_observed_storage:
+      devices: "{{ physical_observed_devices }}"
+      volumes: "{{ physical_observed_volumes }}"
+      plan_fingerprint: "{{ physical_plan_fingerprint }}"
+
+- name: Однократно сохранить только независимо проверенные тома
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: persist-adopted.yml
+
+- name: Независимо сверить опубликованное состояние перед сервисами
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: verified.yml

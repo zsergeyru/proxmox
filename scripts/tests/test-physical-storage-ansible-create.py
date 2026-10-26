@@ -2,6 +2,8 @@
 """Contracts for staged native Ansible disk creation without production cutover."""
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -15,6 +17,75 @@ def read(name: str):
     result = yaml.safe_load((ROLE / name).read_text(encoding="utf-8"))
     assert isinstance(result, list) and result
     return result
+
+
+def test_recreate_preflight_is_strictly_non_destructive() -> None:
+    """Reinitialize intent never means that a mount or system disk is safe."""
+    tasks = read("prepare-recreate-preflight.yml")
+    commands = []
+    for task in tasks:
+        modules = [k for k in task if k.startswith("ansible.builtin.")]
+        assert len(modules) == 1, task.get("name")
+        assert modules[0] in {
+            "ansible.builtin.assert", "ansible.builtin.set_fact",
+            "ansible.builtin.stat", "ansible.builtin.find",
+            "ansible.builtin.command", "ansible.builtin.include_role",
+            "ansible.builtin.debug",
+        }
+        if modules[0] == "ansible.builtin.command":
+            assert task.get("changed_when") is False, task["name"]
+            cmd = task["ansible.builtin.command"]["argv"]
+            assert cmd[0] in {"lsblk", "jq", "readlink"}, cmd
+            commands.append(cmd[0])
+        if modules[0] == "ansible.builtin.include_role":
+            assert task[modules[0]] == {
+                "name": "physical_storage", "tasks_from": "inspect.yml",
+            }
+    assert set(commands) == {"lsblk", "jq", "readlink"}
+    source = (ROLE / "prepare-recreate-preflight.yml").read_text()
+    assert "physical_storage.initialization.recreate_once" in source
+    assert "physical_disk_recreate_authorized" in source
+    assert "physical_disk_intent.fingerprint" in source
+    assert "physical_recreate_previous_state" in source
+    assert "physical_recreate_previous_journal" in source
+    assert "physical_recreate_by_id" in source
+    assert "physical_recreate_actual" in source
+    assert "mountpoints" in source
+    assert "select(any(.. | objects | .mountpoints? | arrays | .[]; . == \"/\"))" in source
+    # No production playbook includes this role until the rest of the
+    # interruption-safe state machine has been verified.
+    for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
+        assert "prepare-recreate-preflight.yml" not in playbook.read_text(), playbook
+
+
+def test_recreate_refuses_nested_system_root() -> None:
+    """The selected serial must not own /, even when root is nested in LVM."""
+    tasks = read("prepare-recreate-preflight.yml")
+    checks = [
+        task["ansible.builtin.command"]["argv"][-1]
+        for task in tasks
+        if task.get("ansible.builtin.command", {}).get("argv", [""])[0] == "jq"
+        and "--arg" in task["ansible.builtin.command"]["argv"]
+    ]
+    assert len(checks) == 1
+    disk_tree = json.dumps({"blockdevices": [
+        {"type": "disk", "serial": "SYSTEM", "mountpoints": [None], "children": [
+            {"type": "part", "mountpoints": [None], "children": [
+                {"type": "lvm", "mountpoints": ["/"]}
+            ]}
+        ]},
+        {"type": "disk", "serial": "SHARED", "mountpoints": [None]},
+        {"type": "disk", "serial": "DATA", "mountpoints": ["/nas-data"]},
+    ]})
+    def check(serial: str) -> int:
+        result = subprocess.run(
+            ["jq", "-e", "--arg", "serial", serial, checks[0]],
+            input=disk_tree, text=True, capture_output=True, check=False,
+        )
+        return result.returncode
+    assert check("SYSTEM") != 0, "The root disk was approved for recreation"
+    assert check("SHARED") == 0
+    assert check("DATA") == 0
 
 
 def test_one_shot_journal() -> None:
@@ -306,8 +377,15 @@ def test_omv_fstab_stage_guards_existing_data() -> None:
         assert not any(key in item for key in (
             "ansible.builtin.shell", "ansible.builtin.raw",
             "ansible.builtin.script", "ansible.builtin.copy",
-            "ansible.builtin.mount", "ansible.builtin.file",
+            "ansible.builtin.mount",
         )), item.get("name")
+        if "ansible.builtin.file" in item:
+            guarded = item["ansible.builtin.file"]
+            assert guarded["path"] == "{{ nas_omv_expected_mounts[0].dir }}"
+            assert guarded["state"] == "directory"
+            assert guarded["follow"] is False
+            assert any("nas_omv_expected_mounts[0].dir is match" in x
+                       for x in item["when"])
         if "ansible.builtin.command" in item:
             argv = item["ansible.builtin.command"]["argv"]
             assert argv[0] in {"findmnt", "omv-salt", "mount"}
@@ -503,7 +581,11 @@ def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
     for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
         if role == path:
             continue
-        assert "prepare-create-complete.yml" not in role.read_text(), role
+        content = role.read_text()
+        if role.name == "initialize-blank.yml":
+            assert "include_tasks: prepare-create-complete.yml" in content
+        else:
+            assert "prepare-create-complete.yml" not in content, role
 
 
 def read_omv_register() -> list:
@@ -528,6 +610,8 @@ def test_item_key_never_collides_with_dict_method() -> None:
 
 
 if __name__ == "__main__":
+    test_recreate_preflight_is_strictly_non_destructive()
+    test_recreate_refuses_nested_system_root()
     test_one_shot_journal()
     test_write_stage_is_gated_and_not_connected()
     test_item_key_never_collides_with_dict_method()

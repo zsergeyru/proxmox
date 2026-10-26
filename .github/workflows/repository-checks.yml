@@ -121,6 +121,9 @@ jobs:
             ansible-playbook -i localhost, -c local \
               scripts/tests/fixtures/physical-storage-intent-smoke.yml \
               -e '{"physical_disk_intent":{"mode":"first-create","fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","items":[{"role":"shared","serial":"TEST-A","action":"create-ext4"},{"role":"data","serial":"TEST-B","action":"create-zfs"},{"role":"backup","serial":"TEST-C","action":"create-zfs"}]}}'
+          ANSIBLE_ROLES_PATH=automation/ansible/roles \
+            ansible-playbook -i localhost, -c local \
+              scripts/tests/fixtures/physical-storage-plan-smoke.yml
 
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py

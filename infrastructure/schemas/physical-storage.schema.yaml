@@ -9,6 +9,19 @@ properties:
   host:
     type: string
     pattern: '^[a-z][a-z0-9-]*$'
+  initialization:
+    type: object
+    additionalProperties: false
+    required: [recreate_once, require_exact_device_confirmation]
+    properties:
+      recreate_once:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          $ref: '#/$defs/identifier'
+      require_exact_device_confirmation:
+        const: true
   devices:
     type: array
     minItems: 1

@@ -62,6 +62,26 @@
     follow: false
   register: nas_omv_activate_ext4_directory
 
+- name: Создать только отсутствующий и ранее проверенный каталог ext4
+  ansible.builtin.file:
+    path: "{{ nas_omv_expected_mounts[0].dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+    follow: false
+  when:
+    - nas_omv_activate_before.results[0].rc == 1
+    - not (nas_omv_activate_ext4_directory.stat.exists | default(false))
+    - nas_omv_expected_mounts[0].dir is match('^/srv/dev-disk-by-uuid-[a-fA-F0-9-]{16,40}$')
+
+- name: Повторно проверить каталог, если его пришлось создать
+  ansible.builtin.stat:
+    path: "{{ nas_omv_expected_mounts[0].dir }}"
+    follow: false
+  register: nas_omv_activate_ext4_directory
+  when: not (nas_omv_activate_ext4_directory.stat.exists | default(false))
+
 - name: Запретить скрыть посторонние данные будущим ext4-подключением
   ansible.builtin.assert:
     that:

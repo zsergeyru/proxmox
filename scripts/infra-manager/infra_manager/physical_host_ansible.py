@@ -36,8 +36,14 @@ def run_physical_ansible(
     name = session.host.name
     if not _HOST.fullmatch(name) or not session.host.address:
         raise InfraManagerError("Недопустимая или неподтверждённая физическая машина")
-    if operation == "deploy" and phase in ("base", "services"):
+    if operation == "deploy" and isinstance(phase, str) and re.fullmatch(r"[a-z][a-z0-9-]*", phase) and phase in session.host.phases:
         playbook_name = f"deploy-{name}.yml"
+    elif operation == "status" and phase is None:
+        playbook_name = f"status-{name}.yml"
+    elif operation == "storage-plan" and phase is None:
+        playbook_name = f"plan-{name}-storage.yml"
+    elif operation == "storage-prepare" and phase is None:
+        playbook_name = f"prepare-{name}-storage.yml"
     elif operation == "inspect" and phase is None:
         playbook_name = "inspect-physical-storage.yml"
     elif operation == "prepare-preflight" and phase is None:

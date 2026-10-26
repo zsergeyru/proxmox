@@ -7,7 +7,7 @@ import re
 import sys
 
 
-PREFIX = "NAS_STORAGE_PLAN_JSON="
+PREFIX = "PHYSICAL_STORAGE_PLAN_JSON="
 
 
 def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
@@ -62,17 +62,23 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         payload = json.dumps({"fingerprint": recovery_fingerprint}) + "\n"
         return forward(["deploy", name, "--_physical_stage", "prepare"], input_text=payload)
     if not plan.get("requires_creation"):
-        return 0
+        # Existing ext4/ZFS still needs independent Ansible verification
+        # and one-time controller-state registration before service deploy.
+        payload = json.dumps({"fingerprint": fingerprint}) + "\n"
+        return forward(
+            ["deploy", name, "--_physical_stage", "prepare"],
+            input_text=payload,
+        )
     if actions not in (
+        ["preserve", "recreate", "recreate", "recreate"],
         ["preserve", "create-ext4", "create-zfs", "create-zfs"],
         ["preserve", "preserve", "create-zfs", "create-zfs"],
     ):
         raise error_type(
-            "План HDD не поддерживается автоматической подготовкой. "
-            "Разрешено создать два новых ZFS-диска, сохранив ранее настроенный ext4, "
-            "либо подготовить три пустых HDD"
+            "План HDD не соответствует декларативно разрешённой подготовке; "
+            "запись запрещена"
         )
-    to_create = items[1:] if actions[1] == "create-ext4" else items[2:]
+    to_create = items[1:] if actions[1] in ("create-ext4", "recreate") else items[2:]
     serials = [item.get("serial") for item in items]
     if any(
         not isinstance(serial, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", serial)
@@ -101,8 +107,9 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
     if actions[1] == "preserve":
         print(f"Существующий HDD 1 ТБ ({items[1]['serial']}) НЕ ФОРМАТИРУЕТСЯ.")
         print("Перед записью на новые диски NAS проверит его ext4, UUID, OMV и подключение.")
-    print("Форматирование уничтожит данные на перечисленных новых дисках.")
-    answer = input("Подготовить ТОЛЬКО указанные новые HDD? [да/нет]: ").strip().casefold()
+    print("ВНИМАНИЕ: повторная подготовка УНИЧТОЖИТ ВСЕ данные на перечисленных дисках.")
+    print("Системный SSD сохраняется, его очистка запрещена.")
+    answer = input("Подтвердить очистку ТОЛЬКО указанных HDD? [да/нет]: ").strip().casefold()
     if answer != "да":
         raise error_type("Подготовка отменена: требуется явное «да», диски не изменены")
     payload = json.dumps({"fingerprint": fingerprint}) + "\n"
