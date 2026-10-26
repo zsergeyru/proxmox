@@ -63,15 +63,6 @@
         - not (physical_plan_previous_journal.stat.exists | default(false))
         - physical_plan_assignments | map(attribute='action') | unique | list == ['preserve']
 
-    - name: Создать ФС только на действительно пустых ранее утверждённых HDD
-      ansible.builtin.include_role:
-        name: nas
-        tasks_from: initialize-blank.yml
-      when:
-        - not (physical_plan_previous.stat.exists | default(false))
-        - not (physical_plan_previous_journal.stat.exists | default(false))
-        - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='action') | unique | list == ['recreate']
-
     - name: Проверить полную идентичность HDD в permanent state 910
       ansible.builtin.include_role:
         name: physical_storage
