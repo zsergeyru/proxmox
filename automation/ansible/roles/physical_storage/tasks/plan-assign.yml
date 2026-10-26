@@ -1,22 +1,23 @@
 ---
-# Called by physical_storage/plan.yml; no service or shell dependencies.
-- name: Проверить единственную подходящую физическую цель для роли
+# Each role consumes one previously unassigned physical disk.
+- name: Проверить единственную подходящую цель по роли и serial
   ansible.builtin.assert:
     that:
       - candidates | length > 0
       - declared_disk.serial is none or candidates | length == 1
       - declared_disk.serial is none or candidates[0].serial == declared_disk.serial
-      - chosen is mapping
       - chosen.serial is match('^[A-Za-z0-9._:-]{1,128}$')
       - chosen.path is match('^/dev/[a-zA-Z0-9._/-]+$')
       - chosen.model is string
-      - chosen.model is match('^[^\\r\\n\\x00-\\x1f]{1,120}$')
       - chosen.size | int >= declared_disk.capacity_gb | int * 950000000
       - chosen.size | int <= declared_disk.capacity_gb | int * 1050000000
       - >-
-        (declared_disk.role == 'system' and chosen.serial == physical_plan_root.stdout | trim)
-        or (declared_disk.role != 'system' and chosen.serial != physical_plan_root.stdout | trim)
-    fail_msg: Нет безопасного и однозначного устройства для роли {{ declared_disk.role }}
+        (declared_disk.role == 'system'
+         and chosen.serial == physical_plan_root.stdout | trim)
+        or
+        (declared_disk.role != 'system'
+         and chosen.serial != physical_plan_root.stdout | trim)
+    fail_msg: Нет безопасного и однозначного диска {{ declared_disk.role }}
   vars:
     matching: >-
       {{ physical_plan_available
@@ -27,12 +28,29 @@
     candidates: >-
       {{ (matching | selectattr('serial', 'equalto', physical_plan_root.stdout | trim) | list)
          if declared_disk.role == 'system'
-         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim) | sort(attribute='serial') | list) }}
+         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim)
+               | sort(attribute='serial') | list) }}
     chosen: "{{ candidates[0] if candidates else {} }}"
 
-- name: Закрепить один диск за ролью и исключить его из дальнейших кандидатов
+- name: Закрепить диск и определить возможность принятия текущей разметки
   ansible.builtin.set_fact:
-    physical_plan_available: "{{ physical_plan_available | rejectattr('serial', 'equalto', chosen.serial) | list }}"
+    physical_plan_available: >-
+      {{ physical_plan_available | rejectattr('serial', 'equalto', chosen.serial) | list }}
+    physical_plan_layout_ready: >-
+      {{ physical_plan_layout_ready | bool and (
+           declared_disk.role == 'system'
+           or (
+             declared_disk.role == 'shared'
+             and chosen.pttype == 'gpt'
+             and chosen.children | default([], true) | length == 1
+             and (chosen.children | default([], true))[0].fstype == 'ext4'
+             and (chosen.children | default([], true))[0].uuid is match('^[a-fA-F0-9-]{16,40}$')
+           )
+           or (
+             declared_disk.role not in ['system', 'shared']
+             and chosen.fstype == 'zfs_member'
+           )
+         ) }}
     physical_plan_assignments: >-
       {{ physical_plan_assignments + [{
         'role': declared_disk.role,
@@ -45,46 +63,6 @@
           '; разделов=' ~ (chosen.children | default([], true) | length | string)
         )
       }] }}
-    physical_plan_layout_ready: >-
-      {{ physical_plan_layout_ready | bool and (
-           declared_disk.role == 'system'
-           or (
-             declared_disk.role == 'shared'
-             and chosen.pttype == 'gpt'
-             and chosen.children | default([], true) | length == 1
-             and (chosen.children | default([], true))[0].fstype == 'ext4'
-             and (chosen.children | default([], true))[0].uuid is match('^[a-fA-F0-9-]{16,40}
-        'role': declared_disk.role,
-        'serial': chosen.serial,
-        'model': chosen.model,
-        'size': chosen.size | int,
-        'action': action
-      }] }}
-  vars:
-    matching: >-
-      {{ physical_plan_available
-         | selectattr('model', 'search', declared_disk.model)
-         | selectattr('size', 'ge', declared_disk.capacity_gb | int * 950000000)
-         | selectattr('size', 'le', declared_disk.capacity_gb | int * 1050000000)
-         | list }}
-    candidates: >-
-      {{ (matching | selectattr('serial', 'equalto', physical_plan_root.stdout | trim) | list)
-         if declared_disk.role == 'system'
-         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim) | sort(attribute='serial') | list) }}
-    chosen: "{{ candidates[0] }}"
-    action: >-
-      {{ 'recreate' if (
-           declared_disk.role != 'system'
-           and not (physical_plan_previous.stat.exists | default(false))
-           and declared_disk.id in (physical_storage.initialization.recreate_once | default([]))
-         ) else 'preserve' }}
-)
-           )
-           or (
-             declared_disk.role not in ['system', 'shared']
-             and chosen.fstype == 'zfs_member'
-           )
-         ) }}
     physical_plan_fingerprint_items: >-
       {{ physical_plan_fingerprint_items + [{
         'role': declared_disk.role,
@@ -103,7 +81,8 @@
     candidates: >-
       {{ (matching | selectattr('serial', 'equalto', physical_plan_root.stdout | trim) | list)
          if declared_disk.role == 'system'
-         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim) | sort(attribute='serial') | list) }}
+         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim)
+               | sort(attribute='serial') | list) }}
     chosen: "{{ candidates[0] }}"
     action: >-
       {{ 'recreate' if (
