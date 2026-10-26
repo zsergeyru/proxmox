@@ -160,6 +160,59 @@ def test_initial_ssh_trust_is_generic() -> None:
         bootstrap.assert_not_called()
 
 
+def test_driverless_physical_operations_route_to_ansible() -> None:
+    """Every physical operation is a declarative Ansible operation, no driver."""
+    class FakeSshSession:
+        def __init__(self, host, node):
+            assert node == "pve"
+            self.host = host
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+
+    calls = []
+    def record(repo, session, **kw):
+        assert repo == ROOT
+        assert session.host.engine == "ansible"
+        calls.append(kw)
+
+    with (
+        patch("infra_manager.physical_host_operations.resolve_saved_host",
+              side_effect=lambda h: h),
+        patch("infra_manager.physical_host_operations.require_host_access"),
+        patch("infra_manager.physical_host_ssh.PhysicalHostSshSession", FakeSshSession),
+        patch("infra_manager.physical_host_ansible.run_physical_ansible", side_effect=record),
+        patch("infra_manager.physical_host_credentials.operator_status_sections"),
+        patch.dict(os.environ, {"INFRA_PVE_NODE": "pve"}, clear=False),
+    ):
+        assert run_physical_host_operation(ROOT, "deploy", "nas") == 0
+        assert [call["operation"] for call in calls] == [
+            "deploy", "deploy", "status",
+        ]
+        assert [call.get("phase") for call in calls] == [
+            "base", "services", None,
+        ]
+        assert all(call["callback"] == "infra_nas_compact" for call in calls)
+        calls.clear()
+        assert run_physical_host_operation(ROOT, "status", "nas") == 0
+        assert len(calls) == 1
+        assert calls[0]["operation"] == "status"
+        calls.clear()
+        assert run_physical_host_operation(ROOT, "storage-plan", "nas") == 0
+        assert len(calls) == 1
+        assert calls[0]["operation"] == "storage-plan"
+        assert calls[0]["callback"] == "infra_storage_plan"
+        calls.clear()
+        with patch("infra_manager.physical_host_operations.sys.stdin",
+                   io.StringIO('{"fingerprint":"' + 'a' * 64 + '"}\\n')):
+            assert run_physical_host_operation(ROOT, "storage-prepare", "nas") == 0
+        assert len(calls) == 1
+        assert calls[0]["operation"] == "storage-prepare"
+        assert calls[0]["variables"]["physical_approved_fingerprint"] == "a" * 64
+        assert calls[0]["variables"]["physical_disk_recreate_authorized"] is True
+
+
 def test_driver_is_not_used_for_schema_or_inspect() -> None:
     parser = (
         ROOT / "scripts/infra-manager/infra_manager/physical_hosts.py"
@@ -178,6 +231,7 @@ def test_driver_is_not_used_for_schema_or_inspect() -> None:
 if __name__ == "__main__":
     test_generic_ansible_transport()
     test_native_disk_read_only_contract()
+    test_driverless_physical_operations_route_to_ansible()
     test_driver_is_not_used_for_schema_or_inspect()
     test_initial_ssh_trust_is_generic()
     print("[ОК] Universal Ansible physical host and read-only disk preflight")
