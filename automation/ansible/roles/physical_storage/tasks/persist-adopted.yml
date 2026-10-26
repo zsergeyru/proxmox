@@ -1,0 +1,200 @@
+---
+# Generic one-time controller commit after independent read-only volume proof.
+# Never changes remote filesystems. The SSH identity file remains separate.
+- name: Проверить полную независимую идентичность усыновляемых томов
+  ansible.builtin.assert:
+    that:
+      - physical_storage.host == physical_host_name
+      - physical_approved_fingerprint == physical_plan_fingerprint
+      - physical_observed_storage.plan_fingerprint == physical_plan_fingerprint
+      - physical_plan_layout_ready | bool
+      - physical_observed_storage.devices | length == physical_storage.devices | length
+      - physical_observed_storage.volumes.keys() | list | sort == physical_storage.volumes | map(attribute='id') | list | sort
+      - physical_observed_storage.devices | map(attribute='serial') | unique | list | length == physical_observed_storage.devices | length
+    fail_msg: Нет независимо подтверждённого состояния всех HDD
+
+- name: Сверить закрепляемую роль каждого физического диска с YAML
+  ansible.builtin.assert:
+    that:
+      - matching | length == 1
+      - matching[0].model == item.model
+      - matching[0].capacity_gb | int == item.capacity_gb | int
+      - matching[0].serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - item.serial is none or matching[0].serial == item.serial
+    fail_msg: Диск {{ item.role }} не соответствует декларации
+  vars:
+    matching: "{{ physical_observed_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
+  loop: "{{ physical_storage.devices }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Проверить фактические UUID, GUID, каталоги и OMV
+  ansible.builtin.assert:
+    that:
+      - actual is mapping
+      - actual.omv_reference is match('^[0-9a-fA-F-]{36}$')
+      - actual.mountpoint is match('^/[A-Za-z0-9_./-]+$')
+      - >-
+        (item.kind == 'ext4'
+         and actual.filesystem_uuid is match('^[0-9a-fA-F-]{16,40}$')
+         and actual.mountpoint == '/srv/dev-disk-by-uuid-' ~ actual.filesystem_uuid)
+        or
+        (item.kind == 'zfs_pool'
+         and actual.pool == item.pool
+         and actual.pool_guid is match('^[0-9]{1,20}$')
+         and actual.mountpoint == '/' ~ item.pool)
+    fail_msg: Подтверждение тома {{ item.id }} неполно
+  vars:
+    actual: "{{ physical_observed_storage.volumes[item.id] | default({}) }}"
+  loop: "{{ physical_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Проверить каталог постоянного состояния контроллера
+  ansible.builtin.stat:
+    path: /var/lib/infra-manager/physical-hosts
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_state_root
+
+- name: Узнать настоящий путь постоянного состояния
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, /var/lib/infra-manager/physical-hosts]
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_state_canonical
+  changed_when: false
+
+- name: Независимо проверить права конечного каталога
+  ansible.builtin.stat:
+    path: /var/lib/infra-manager/physical-hosts
+    follow: true
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_state_directory
+
+- name: Разрешить только постоянное физическое состояние 910
+  ansible.builtin.assert:
+    that:
+      - physical_adopt_state_directory.stat.isdir | default(false)
+      - physical_adopt_state_directory.stat.mode in ['0700', '0750']
+      - >-
+        not (physical_adopt_state_root.stat.islnk | default(false))
+        or physical_adopt_state_canonical.stdout == '/mnt/persistent-state/physical-hosts'
+    fail_msg: Нет защищённого постоянного каталога physical-hosts
+
+- name: Проверить сохранённый SSH trust физической машины
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}.json"
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_ssh_file
+
+- name: Не сохранять диски без подтверждённого SSH trust
+  ansible.builtin.assert:
+    that:
+      - physical_adopt_ssh_file.stat.isreg | default(false)
+      - physical_adopt_ssh_file.stat.mode == '0600'
+      - not (physical_adopt_ssh_file.stat.islnk | default(false))
+    fail_msg: Состояние SSH физического сервера не подтверждено
+
+- name: Прочитать закрытую SSH идентичность
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}.json"
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_ssh_bytes
+  no_log: true
+
+- name: Сверить IP и отпечаток доверенного SSH
+  ansible.builtin.set_fact:
+    physical_adopt_ssh_record: "{{ physical_adopt_ssh_bytes.content | b64decode | from_json }}"
+  no_log: true
+
+- name: Запретить подмену доверенного физического сервера
+  ansible.builtin.assert:
+    that:
+      - physical_adopt_ssh_record.name == physical_host_name
+      - physical_adopt_ssh_record.address == ansible_host
+      - physical_adopt_ssh_record.fingerprint is match('^SHA256:[A-Za-z0-9+/]{43}$')
+    fail_msg: SSH trust не соответствует целевому серверу
+
+- name: Сформировать итоговую идентичность без секретов
+  ansible.builtin.set_fact:
+    physical_adopt_storage_document:
+      name: "{{ physical_host_name }}"
+      address: "{{ ansible_host }}"
+      fingerprint: "{{ physical_adopt_ssh_record.fingerprint }}"
+      devices: "{{ physical_observed_storage.devices }}"
+      volumes: "{{ physical_observed_storage.volumes }}"
+  no_log: true
+
+- name: Проверить старое назначение перед возможной первой записью
+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_saved_state
+
+- name: Запретить неизвестные файлы, ссылки и открытые права
+  ansible.builtin.assert:
+    that:
+      - not (physical_adopt_saved_state.stat.islnk | default(false))
+      - >-
+        not (physical_adopt_saved_state.stat.exists | default(false))
+        or (
+          physical_adopt_saved_state.stat.isreg | default(false)
+          and physical_adopt_saved_state.stat.mode == '0600'
+        )
+    fail_msg: Существующая идентичность повреждена, перезапись запрещена
+
+- name: Прочитать старое назначение при повторном вызове
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+  register: physical_adopt_old_bytes
+  delegate_to: localhost
+  become: false
+  when: physical_adopt_saved_state.stat.exists | default(false)
+  no_log: true
+
+- name: Запретить изменение ранее подтверждённых UUID/GUID
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (physical_adopt_saved_state.stat.exists | default(false))
+        or (physical_adopt_old_bytes.content | b64decode | from_json)
+           == physical_adopt_storage_document
+    fail_msg: Уже назначенные диски или тома изменились
+  no_log: true
+
+- name: Сохранить окончательно подтверждённые HDD однократно и атомарно
+  ansible.builtin.copy:
+    dest: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    content: "{{ physical_adopt_storage_document | to_nice_json }}\n"
+    mode: '0600'
+    force: false
+    follow: false
+    unsafe_writes: false
+  delegate_to: localhost
+  become: false
+  when: not (physical_adopt_saved_state.stat.exists | default(false))
+  register: physical_adopt_saved
+  no_log: true
+
+- name: Прочитать фактически записанное подтверждение с 910
+  ansible.builtin.slurp:
+    src: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+  delegate_to: localhost
+  become: false
+  register: physical_adopt_committed_bytes
+  no_log: true
+
+- name: Подтвердить совпадение сохранённых дисков и GUID
+  ansible.builtin.assert:
+    that:
+      - (physical_adopt_committed_bytes.content | b64decode | from_json) == physical_adopt_storage_document
+    fail_msg: Сохранение результатов не подтверждено, deploy остановлен
+  no_log: true
