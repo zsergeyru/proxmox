@@ -241,6 +241,43 @@ def test_omv_native_registration_is_safe_and_disconnected() -> None:
             assert "include_tasks: prepare-omv-register.yml" not in doc, path
 
 
+def test_omv_post_registration_verification_is_read_only() -> None:
+    path = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-verify.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(tasks, list) and len(tasks) >= 7
+    commands = []
+    for task in tasks:
+        modules = [k for k in task if k.startswith("ansible.builtin.")]
+        assert len(modules) == 1, task.get("name")
+        assert modules[0] in {
+            "ansible.builtin.assert", "ansible.builtin.set_fact",
+            "ansible.builtin.command",
+        }, task.get("name")
+        if "ansible.builtin.command" in task:
+            assert task.get("changed_when") is False
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[0] in {"findmnt", "zpool"}
+            if argv[0] == "zpool":
+                assert argv[1:3] == ["get", "-H"]
+            commands.append(argv[0])
+    assert set(commands) == {"findmnt", "zpool"}
+    source = path.read_text(encoding="utf-8")
+    assert "nas_omv_registered.keys() | list | sort" in source
+    assert "nas_omv_verified_mounts" in source
+    assert "nas_omv_verified_guids" in source
+    assert "nas_omv_verified_volumes" in source
+    assert "physical_recovery_journal.fingerprint" in source
+    for folder in (
+        ROOT / "automation/ansible/playbooks",
+        ROOT / "automation/ansible/roles",
+    ):
+        for candidate in folder.rglob("*.yml"):
+            if candidate == path:
+                continue
+            doc = candidate.read_text(encoding="utf-8")
+            assert "tasks_from: prepare-omv-verify.yml" not in doc, candidate
+
+
 def read_omv_register() -> list:
     name = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
     content = yaml.safe_load(name.read_text(encoding="utf-8"))
@@ -270,4 +307,5 @@ if __name__ == "__main__":
     test_recovery_is_strictly_read_only()
     test_omv_recovery_audit_is_read_only()
     test_omv_native_registration_is_safe_and_disconnected()
+    test_omv_post_registration_verification_is_read_only()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
