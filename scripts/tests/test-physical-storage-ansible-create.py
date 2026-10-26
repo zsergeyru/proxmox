@@ -100,6 +100,33 @@ def test_preserved_ext4_is_checked_without_writes() -> None:
             }
 
 
+def test_recovery_is_strictly_read_only() -> None:
+    tasks = read("prepare-recover-inspect.yml")
+    assert len(tasks) >= 10
+    assert "physical_recovery_journal_stat" in str(tasks)
+    assert "physical_recovery_journal_bytes" in str(tasks)
+    assert "physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint" in str(tasks)
+    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in str(tasks)
+    assert "physical_recovery_ext4" in str(tasks)
+    assert "physical_recovery_guids" in str(tasks)
+    assert "physical_recovery_zpool_status" in str(tasks)
+    for task in tasks:
+        for forbidden in (
+            "ansible.builtin.shell", "ansible.builtin.script",
+            "ansible.builtin.raw", "ansible.builtin.copy",
+            "ansible.builtin.file", "ansible.builtin.mount",
+        ):
+            assert forbidden not in task, task.get("name")
+        if "ansible.builtin.command" in task:
+            assert task.get("changed_when") is False
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[0] in {"lsblk", "jq", "blkid", "zpool"}
+            if argv[0] == "zpool":
+                assert argv[1] in {"status", "get"}
+    for p in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
+        assert "prepare-recover-inspect.yml" not in p.read_text(encoding="utf-8")
+
+
 def test_item_key_never_collides_with_dict_method() -> None:
     preflight = read("prepare-preflight.yml")
     journal = read("prepare-journal.yml")
@@ -119,4 +146,5 @@ if __name__ == "__main__":
     test_write_stage_is_gated_and_not_connected()
     test_item_key_never_collides_with_dict_method()
     test_preserved_ext4_is_checked_without_writes()
+    test_recovery_is_strictly_read_only()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
