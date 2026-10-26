@@ -19,6 +19,39 @@ def read(name: str):
     return result
 
 
+def test_production_nas_deploy_is_preserve_only() -> None:
+    """Existing NAS disks must never enter a destructive first-create path."""
+    storage = yaml.safe_load(
+        (ROOT / "infrastructure/hosts/nas/storage.yaml").read_text(encoding="utf-8")
+    )
+    assert "initialization" not in storage
+    assert storage["policies"]["existing_data"] == "preserve"
+    assert {d["role"]: d["serial"] for d in storage["devices"] if d["role"] != "system"} == {
+        "shared": "Z4Y4DB7V", "data": "WW692JZ4", "backup": "WW69BCHK",
+    }
+
+    entry = ROOT / "automation/ansible/playbooks/prepare-nas-storage.yml"
+    tasks = yaml.safe_load(entry.read_text(encoding="utf-8"))[0]["tasks"]
+    routes = [
+        t.get("ansible.builtin.include_role", {}).get("tasks_from")
+        for t in tasks if "ansible.builtin.include_role" in t
+    ]
+    assert "adopt-storage.yml" in routes
+    assert "prepare-recover-complete.yml" in routes
+    assert "initialize-blank.yml" not in routes
+    assert "prepare-create-complete.yml" not in routes
+    assert not any("prepare-write.yml" in str(t) for t in tasks)
+
+    assign = (ROLE / "plan-assign.yml").read_text(encoding="utf-8")
+    assert "physical_storage.initialization.recreate_once" not in assign
+    assert "physical_plan_previous_journal.stat.exists" in assign
+    plan = yaml.safe_load((ROLE / "plan.yml").read_text(encoding="utf-8"))
+    guard = next(t for t in plan
+        if t["name"] == "Запретить создание и очистку дисков при любой неполной разметке")
+    assert "physical_plan_layout_ready | bool" in guard["ansible.builtin.assert"]["that"]
+    assert "previous_journal" in str(guard)
+    assert "physical_plan_layout_ready" in str(plan)
+
 def test_recreate_preflight_is_strictly_non_destructive() -> None:
     """Reinitialize intent never means that a mount or system disk is safe."""
     tasks = read("prepare-recreate-preflight.yml")
@@ -644,6 +677,7 @@ def test_item_key_never_collides_with_dict_method() -> None:
 
 
 if __name__ == "__main__":
+    test_production_nas_deploy_is_preserve_only()
     test_recreate_preflight_is_strictly_non_destructive()
     test_recreate_refuses_nested_system_root()
     test_one_shot_journal()
