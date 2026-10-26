@@ -1,0 +1,57 @@
+---
+# Brand-new disks only: no existing partition, ext4 or ZFS member may be
+# overwritten by this path. All creation is journal-first and one-shot.
+- name: Запретить создание без подтверждённого отпечатка всех четырёх дисков
+  ansible.builtin.assert:
+    that:
+      - physical_disk_recreate_authorized | default(false) | bool
+      - physical_approved_fingerprint == physical_plan_fingerprint
+      - physical_plan_assignments | length == physical_storage.devices | length
+      - not (physical_plan_previous.stat.exists | default(false))
+      - physical_plan_assignments | selectattr('role', 'equalto', 'system') | map(attribute='action') | first == 'preserve'
+      - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='action') | unique | list == ['recreate']
+      - physical_storage.initialization.require_exact_device_confirmation | bool
+    fail_msg: Первоначальное создание ФС требует подтверждения точных пустых HDD
+
+- name: Собрать одобряемые операции из типов объявленных томов
+  ansible.builtin.set_fact:
+    physical_disk_first_create_items: []
+
+- name: Добавить создание каждой ФС на ранее назначенном HDD
+  ansible.builtin.set_fact:
+    physical_disk_first_create_items: >-
+      {{ physical_disk_first_create_items + [{
+        'role': item.id,
+        'serial': (physical_plan_assignments
+          | selectattr('role', 'equalto', item.id) | first).serial,
+        'action': 'create-ext4' if item.kind == 'ext4' else 'create-zfs'
+      }] }}
+  loop: "{{ physical_storage.volumes }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Сформировать внутреннее однократное подтверждение без изменений extra-vars
+  ansible.builtin.set_fact:
+    physical_disk_intent:
+      schema_version: 1
+      host: "{{ physical_host_name }}"
+      mode: first-create
+      fingerprint: "{{ physical_plan_fingerprint }}"
+      items: "{{ physical_disk_first_create_items }}"
+    nas_first_create_authorized: true
+    nas_omv_registration_authorized: true
+    physical_storage_state_commit_authorized: true
+
+- name: Проверить действия, привязанные к модели, serial и отпечатку PVE
+  ansible.builtin.assert:
+    that:
+      - physical_disk_intent['items'] | length == 3
+      - physical_disk_intent['items'] | map(attribute='role') | list | sort == ['backup', 'data', 'shared']
+      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == 3
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
+      - physical_disk_intent.fingerprint == physical_approved_fingerprint
+    fail_msg: Одноразовая подготовка не соответствует объявленным FS
+
+- name: Применить единственный Ansible journal-first workflow к новым пустым дискам
+  ansible.builtin.include_tasks: prepare-create-complete.yml
