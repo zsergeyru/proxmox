@@ -73,6 +73,60 @@
     argv: [findmnt, --mountpoint, "{{ nas_data_mountpoint }}", --types, zfs]
   changed_when: false
 
+# Linux OpenZFS defaults to acltype=off.  setfacl below would fail on
+# a normally created nas-data pool without explicit POSIX ACL support.
+# This is a property change only; never creates or replaces a filesystem.
+- name: Повторно подтвердить GUID data ZFS перед настройкой прав Samba
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ nas_data_pool }}"]
+  register: nas_smb_pool_guid
+  changed_when: false
+
+- name: Запретить изменение прав на чужом ZFS-пуле
+  ansible.builtin.assert:
+    that:
+      - nas_smb_pool_guid.stdout | trim == nas_data_guid | string
+      - nas_data_mountpoint == '/' ~ nas_data_pool
+    fail_msg: Не подтверждён ZFS-пул данных для прав Samba
+
+- name: Проверить состояние ZFS extended attributes
+  ansible.builtin.command:
+    argv: [zfs, get, -H, -o, value, xattr, "{{ nas_data_pool }}"]
+  register: nas_smb_zfs_xattr
+  changed_when: false
+
+- name: Не включать ACL при отключённых ZFS xattr
+  ansible.builtin.assert:
+    that:
+      - nas_smb_zfs_xattr.stdout | trim in ['dir', 'sa']
+    fail_msg: >-
+      ZFS xattr отключён или имеет неподдерживаемый тип;
+      назначение POSIX ACL остановлено без изменения пула
+
+- name: Прочитать текущий POSIX ACL тип существующего пула
+  ansible.builtin.command:
+    argv: [zfs, get, -H, -o, value, acltype, "{{ nas_data_pool }}"]
+  register: nas_smb_zfs_acl_before
+  changed_when: false
+
+- name: Включить POSIX ACL существующего ZFS без форматирования
+  ansible.builtin.command:
+    argv: [zfs, set, acltype=posixacl, "{{ nas_data_pool }}"]
+  when: nas_smb_zfs_acl_before.stdout | trim not in ['posix', 'posixacl']
+  changed_when: true
+
+- name: Перепроверить фактически доступный POSIX ACL на data ZFS
+  ansible.builtin.command:
+    argv: [zfs, get, -H, -o, value, acltype, "{{ nas_data_pool }}"]
+  register: nas_smb_zfs_acl_after
+  changed_when: false
+
+- name: Запретить публикацию Samba без действующих POSIX ACL
+  ansible.builtin.assert:
+    that:
+      - nas_smb_zfs_acl_after.stdout | trim in ['posix', 'posixacl']
+    fail_msg: Пул nas-data не подтвердил POSIX ACL; публикация Samba остановлена
+
 - name: Создать объявленные общие каталоги без удаления файлов
   ansible.builtin.file:
     path: "{{ (nas_shared_mount if item.volume == 'shared' else nas_data_mountpoint) ~ '/' ~ item.directory }}"
