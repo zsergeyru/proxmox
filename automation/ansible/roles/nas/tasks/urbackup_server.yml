@@ -80,10 +80,8 @@
         'client_name': nas_backup_policy.local_client.name
       } | to_nice_json }}
 
-- name: Проверить GUID и реальные точки подключения до записи
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-safe, preflight]
-  changed_when: false
+- name: Подтвердить настоящие GUID и mountpoints ZFS через Ansible
+  ansible.builtin.include_tasks: urbackup-verify-volumes.yml
 
 - name: Подготовить только собственные каталоги состояния NAS
   ansible.builtin.file:
@@ -129,10 +127,13 @@
     mode: "0600"
   register: nas_urbackup_compose
 
-- name: Подготовить резервные папки строго на проверенном ZFS
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-safe, prepare]
-  changed_when: false
+- name: Подготовить изолированный каталог восстановления на проверенном ZFS
+  ansible.builtin.file:
+    path: "{{ nas_backup_mountpoint }}/urbackup/recovery"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
 
 - name: Проверить Docker Compose перед запуском
   ansible.builtin.command:
@@ -153,11 +154,8 @@
   register: nas_urbackup_pulled
   changed_when: nas_urbackup_pulled.rc == 0
 
-- name: Инициализировать закрытого администратора до открытия сервера
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-safe, init-admin]
-  no_log: true
-  changed_when: false
+- name: Выполнить безопасную одноразовую инициализацию администратора Ansible
+  ansible.builtin.include_tasks: urbackup-admin.yml
 
 - name: Установить проверяемую службу UrBackup Server
   ansible.builtin.template:
@@ -206,7 +204,5 @@
     daemon_reload: true
     state: started
 
-- name: Подтвердить закрытый локальный статус
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-safe, status]
-  changed_when: false
+- name: Ещё раз подтвердить физические ZFS после запуска UrBackup
+  ansible.builtin.include_tasks: urbackup-verify-volumes.yml
