@@ -139,6 +139,104 @@ def credential_plan(repo_root: Path, host: str) -> dict:
     ]}
 
 
+
+def _operator_service_sections(repo_root: Path, host: str, address: str) -> None:
+    """Render optional service endpoints strictly from the host's YAML.
+
+    No service type, OMV API, port, NAS password or host-specific dispatch
+    is embedded in the controller. Loopback URLs are marked as private.
+    """
+    folder = repo_root / "infrastructure" / "hosts" / host
+    manifest = folder / "provision.yaml"
+    if not manifest.is_file():
+        return
+    try:
+        provision = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise InfraManagerError("Нельзя прочитать декларации адресов служб") from exc
+    if not isinstance(provision, dict) or provision.get("host") != host:
+        raise InfraManagerError("Некорректная декларация физического сервера")
+    services = provision.get("services", {})
+    deployment = provision.get("deployment", {})
+    if not isinstance(services, dict) or not isinstance(deployment, dict):
+        raise InfraManagerError("Неизвестный формат описания служб")
+    components = deployment.get("components", [])
+    if not isinstance(components, list):
+        raise InfraManagerError("Некорректный список компонентов")
+    backup_path = folder / "backup.yaml"
+    backup = {}
+    if backup_path.is_file():
+        try:
+            backup = yaml.safe_load(backup_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise InfraManagerError("Нельзя прочитать ссылки сервиса резервирования") from exc
+        if not isinstance(backup, dict) or backup.get("host") != host:
+            raise InfraManagerError("Некорректное объявление параметров резервирования")
+    for service in services.values():
+        if not isinstance(service, dict):
+            raise InfraManagerError("Некорректная служба в provision.yaml")
+        if service.get("component") not in [*components, "base"]:
+            continue
+        title = service.get("title")
+        operator = service.get("operator")
+        if not isinstance(title, str) or not isinstance(operator, dict):
+            continue
+        if not title or len(title) > 100 or any(ord(c) < 32 for c in title):
+            raise InfraManagerError("Недопустимое отображаемое имя службы")
+        template = service.get("url") or service.get("address")
+        if not isinstance(template, str):
+            continue
+        if template == "auto_omv":
+            # An auto-discovered endpoint MUST NOT be turned into a guessed URL.
+            endpoint = address + " (точный URL определяется настройками сервера)"
+        else:
+            fields = {"address": address}
+            for values in (backup.get("server", {}), service.get("runtime", {})):
+                if isinstance(values, dict):
+                    for key in ("web_port", "web_bind"):
+                        if key in values:
+                            fields[key] = values[key]
+            try:
+                pieces = list(Formatter().parse(template))
+                if not pieces or not all(
+                    name is None or name in ("address", "web_port", "web_bind")
+                    for _, name, _, _ in pieces
+                ) or not all(
+                    not fmt and conv is None for _, _, fmt, conv in pieces
+                ):
+                    raise ValueError("invalid service URL format")
+                endpoint = template.format(**fields)
+            except (ValueError, KeyError, IndexError, AttributeError) as exc:
+                raise InfraManagerError("Небезопасный шаблон адреса службы") from exc
+            if (
+                len(endpoint) > 250
+                or not endpoint.startswith(("http://", "https://"))
+                or any(ord(c) < 32 or ord(c) == 127 for c in endpoint)
+            ):
+                raise InfraManagerError("Небезопасный опубликованный адрес службы")
+        print("\n" + title)
+        print("  Адрес:       " + endpoint)
+        access = service.get("access")
+        if isinstance(access, str):
+            try:
+                access = access.format(**fields) if template != "auto_omv" else access
+            except (ValueError, KeyError) as exc:
+                raise InfraManagerError("Некорректное описание доступа службы") from exc
+            if len(access) > 250 or any(ord(c) < 32 for c in access):
+                raise InfraManagerError("Некорректное описание доступа службы")
+            print("  Доступ:      " + access)
+        username = operator.get("username")
+        if isinstance(username, str) and username:
+            if len(username) > 128 or any(ord(c) < 32 for c in username):
+                raise InfraManagerError("Некорректный логин службы")
+            print("  Логин:       " + username)
+        if isinstance(operator.get("password"), dict):
+            # The controller cannot safely guess or read an NAS-local root
+            # secret; the trusted Samba credential is handled separately.
+            print("  Пароль:      хранится в защищённом состоянии физического сервера")
+
+
+
 def operator_status_sections(
     repo_root: Path, host: str, address: str, *,
     show_secrets: bool,
@@ -169,3 +267,4 @@ def operator_status_sections(
                 raise InfraManagerError("Нельзя прочитать ресурсы физической машины") from exc
             for name in names:
                 print("  Папка:       " + status["share_url"].format(address=address, name=name))
+    _operator_service_sections(repo_root, host, address)
