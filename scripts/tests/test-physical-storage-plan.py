@@ -122,7 +122,7 @@ def main():
         )
         for d in disks
     )))
-    assert build_parser().parse_args(["storage-plan", "nas"]).name == "nas"
+    assert build_parser().parse_args(["deploy", "nas", "--_physical_stage", "plan"]).vmid == "nas"
     print("[ОК] План назначения дисков NAS проверен без форматирования")
     return 0
 
