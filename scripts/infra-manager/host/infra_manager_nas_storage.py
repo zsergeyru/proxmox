@@ -13,7 +13,7 @@ PREFIX = "NAS_STORAGE_PLAN_JSON="
 def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
     """Показать план, запросить подтверждение и передать только его отпечаток."""
 
-    result = forward(["storage-plan", name], capture_output=True)
+    result = forward(["deploy", name, "--_physical_stage", "plan"], capture_output=True)
     if result.stdout:
         for line in result.stdout.splitlines():
             if not line.startswith(PREFIX):
@@ -60,7 +60,7 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
             "БЕЗ повторного форматирования"
         )
         payload = json.dumps({"fingerprint": recovery_fingerprint}) + "\n"
-        return forward(["storage-prepare", name], input_text=payload)
+        return forward(["deploy", name, "--_physical_stage", "prepare"], input_text=payload)
     if not plan.get("requires_creation"):
         return 0
     if actions not in (
@@ -106,4 +106,4 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
     if answer != "да":
         raise error_type("Подготовка отменена: требуется явное «да», диски не изменены")
     payload = json.dumps({"fingerprint": fingerprint}) + "\n"
-    return forward(["storage-prepare", name], input_text=payload)
+    return forward(["deploy", name, "--_physical_stage", "prepare"], input_text=payload)
