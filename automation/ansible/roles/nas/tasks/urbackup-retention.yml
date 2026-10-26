@@ -215,6 +215,16 @@
   register: nas_retention_clients_http
   changed_when: false
   no_log: true
+  retries: 12
+  delay: 5
+  until: >-
+    nas_retention_clients_http.status | default(0) == 200
+    and (nas_retention_clients_http.content | default('{}') | from_json).status is defined
+    and (
+      (nas_retention_clients_http.content | from_json).status
+      | selectattr('name', 'equalto', nas_backup_policy.local_client.name)
+      | list | length == 1
+    )
 
 - name: Найти только явно объявленный nas-local
   ansible.builtin.set_fact:
