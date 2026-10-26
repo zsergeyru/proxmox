@@ -284,7 +284,7 @@ def test_generic_operator_services_derive_endpoints_from_yaml() -> None:
     assert "qBittorrent" in lines
     assert "UrBackup Server" in lines
     assert "admin" in lines
-    assert "сервере" in lines
+    assert "сервера" in lines
     assert "Пароль:" in lines
     assert "скрыт" in lines
     assert "0000" not in lines
