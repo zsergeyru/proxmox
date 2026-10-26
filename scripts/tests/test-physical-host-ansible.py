@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -179,7 +180,7 @@ def test_driverless_physical_operations_route_to_ansible() -> None:
 
     with (
         patch("infra_manager.physical_host_operations.resolve_saved_host",
-              side_effect=lambda h: h),
+              side_effect=lambda h: replace(h, ssh_host_fingerprint="SHA256:" + "A" * 43)),
         patch("infra_manager.physical_host_operations.require_host_access"),
         patch("infra_manager.physical_host_ssh.PhysicalHostSshSession", FakeSshSession),
         patch("infra_manager.physical_host_ansible.run_physical_ansible", side_effect=record),
