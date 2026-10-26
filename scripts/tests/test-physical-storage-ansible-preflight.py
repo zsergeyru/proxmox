@@ -47,7 +47,7 @@ def test_preflight_has_no_disk_writes() -> None:
     text = path.read_text(encoding="utf-8")
     for term in (
         "physical_disk_intent.fingerprint",
-        "physical_disk_intent.items",
+        "physical_disk_intent['items']",
         "physical_preparation_saved",
         "physical_preparation_journal",
         "physical_preparation_by_id",
