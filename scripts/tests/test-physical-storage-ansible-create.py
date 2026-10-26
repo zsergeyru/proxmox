@@ -479,6 +479,25 @@ def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
         "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
     )
     assert "ansible.builtin.debug" in tasks[-1]
+    # Recovery must read a separate fact: -e physical_disk_intent has
+    # highest precedence and cannot be rewritten via set_fact.
+    for name in (
+        "inspect-nas-storage-recovery.yml",
+        "inspect-physical-storage-recovery.yml",
+    ):
+        entry = yaml.safe_load(
+            (ROOT / "automation/ansible/playbooks" / name).read_text()
+        )
+        assert entry[0]["vars"]["physical_recovery_intent"] == (
+            "{{ physical_disk_intent }}"
+        )
+    recovery = yaml.safe_load(
+        (ROOT / "automation/ansible/roles/nas/tasks/prepare-recover-complete.yml").read_text()
+    )
+    assert "physical_recovery_intent is mapping" in recovery[0]["ansible.builtin.assert"]["that"]
+    assert "physical_recovery_intent.fingerprint == physical_disk_intent.fingerprint" in (
+        recovery[0]["ansible.builtin.assert"]["that"]
+    )
     for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
         assert "prepare-create-complete.yml" not in playbook.read_text(), playbook
     for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
