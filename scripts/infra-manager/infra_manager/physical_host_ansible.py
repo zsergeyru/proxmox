@@ -44,8 +44,8 @@ def run_physical_ansible(
         # This playbook has no write commands and cannot create filesystems.
         playbook_name = "prepare-physical-storage-preflight.yml"
     elif operation == "recover-inspect" and phase is None:
-        # Verify an existing one-shot journal; NEVER format or repartition.
-        playbook_name = "inspect-physical-storage-recovery.yml"
+        # Select only a Git-managed per-host audit playbook, never a disk writer.
+        playbook_name = f"inspect-{name}-storage-recovery.yml"
     else:
         raise InfraManagerError("Недопустимый Ansible playbook или этап")
     playbook = repo_root / "automation" / "ansible" / "playbooks" / playbook_name
