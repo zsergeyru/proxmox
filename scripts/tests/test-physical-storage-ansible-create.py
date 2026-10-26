@@ -82,6 +82,24 @@ def test_write_stage_is_gated_and_not_connected() -> None:
         assert "tasks_from: prepare-journal.yml" not in source, p
 
 
+def test_preserved_ext4_is_checked_without_writes() -> None:
+    preserved = read("prepare-preserved-ext4.yml")
+    assert "physical_preserved_ext4_items" in str(preserved)
+    assert "physical_preserved_ext4_mounts" in str(preserved)
+    assert "physical_preserved_ext4_sources" in str(preserved)
+    assert "filesystem_uuid" in str(preserved)
+    for task in preserved:
+        assert not any(key in task for key in (
+            "ansible.builtin.shell", "ansible.builtin.raw",
+            "ansible.builtin.script", "ansible.builtin.copy",
+        ))
+        if "ansible.builtin.command" in task:
+            assert task["changed_when"] is False
+            assert task["ansible.builtin.command"]["argv"][0] in {
+                "blkid", "findmnt", "readlink",
+            }
+
+
 def test_item_key_never_collides_with_dict_method() -> None:
     preflight = read("prepare-preflight.yml")
     journal = read("prepare-journal.yml")
@@ -100,4 +118,5 @@ if __name__ == "__main__":
     test_one_shot_journal()
     test_write_stage_is_gated_and_not_connected()
     test_item_key_never_collides_with_dict_method()
+    test_preserved_ext4_is_checked_without_writes()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
