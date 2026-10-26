@@ -24,7 +24,9 @@ def check_contract() -> None:
     assert "nas" in {host.name for host in hosts}
     nas = load_physical_host(ROOT, "nas")
     assert nas.address == "192.168.1.12"
-    assert nas.driver == "omv8"
+    assert nas.engine == "ansible"
+    assert nas.phases == ("base", "services")
+    assert nas.callback == "infra_nas_compact"
     assert nas.ssh_host_fingerprint is None
     assert [item["role"] for item in nas.devices] == [
         "system", "shared", "data", "backup"
