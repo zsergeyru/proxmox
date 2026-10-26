@@ -211,7 +211,7 @@ def test_driverless_physical_operations_route_to_ansible() -> None:
         assert len(calls) == 1
         assert calls[0]["operation"] == "storage-prepare"
         assert calls[0]["variables"]["physical_approved_fingerprint"] == "a" * 64
-        assert calls[0]["variables"]["physical_disk_recreate_authorized"] is True
+        assert "physical_disk_recreate_authorized" not in calls[0]["variables"]
 
 
 def test_no_runtime_driver_or_service_specific_dispatch() -> None:
