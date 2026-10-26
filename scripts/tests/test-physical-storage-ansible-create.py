@@ -19,6 +19,79 @@ def read(name: str):
     return result
 
 
+def test_production_nas_deploy_is_preserve_only() -> None:
+    """Existing NAS disks must never enter a destructive first-create path."""
+    storage = yaml.safe_load(
+        (ROOT / "infrastructure/hosts/nas/storage.yaml").read_text(encoding="utf-8")
+    )
+    assert "initialization" not in storage
+    assert storage["policies"]["existing_data"] == "preserve"
+    assert {d["role"]: d["serial"] for d in storage["devices"] if d["role"] != "system"} == {
+        "shared": "Z4Y4DB7V", "data": "WW692JZ4", "backup": "WW69BCHK",
+    }
+
+    entry = ROOT / "automation/ansible/playbooks/prepare-nas-storage.yml"
+    tasks = yaml.safe_load(entry.read_text(encoding="utf-8"))[0]["tasks"]
+    routes = [
+        t.get("ansible.builtin.include_role", {}).get("tasks_from")
+        for t in tasks if "ansible.builtin.include_role" in t
+    ]
+    assert "adopt-storage.yml" in routes
+    assert "prepare-recover-complete.yml" in routes
+    assert "initialize-blank.yml" not in routes
+    assert "prepare-create-complete.yml" not in routes
+    assert not any("prepare-write.yml" in str(t) for t in tasks)
+
+    assign = (ROLE / "plan-assign.yml").read_text(encoding="utf-8")
+    assert "physical_storage.initialization.recreate_once" not in assign
+    assert "physical_plan_previous_journal.stat.exists" in assign
+    plan = yaml.safe_load((ROLE / "plan.yml").read_text(encoding="utf-8"))
+    guard = next(t for t in plan
+        if t["name"] == "Запретить создание и очистку дисков при любой неполной разметке")
+    assert "physical_plan_layout_ready | bool" in guard["ansible.builtin.assert"]["that"]
+    assert "previous_journal" in str(guard)
+    assert "physical_plan_layout_ready" in str(plan)
+
+def test_adopt_ext4_can_mount_only_after_verified_omv_fstab() -> None:
+    """Old ext4 may be unmounted; mounting cannot hide files or use another disk."""
+    file = ROOT / "automation/ansible/roles/nas/tasks/adopt-storage.yml"
+    tasks = yaml.safe_load(file.read_text(encoding="utf-8"))
+    titles = [task["name"] for task in tasks]
+    def index(name: str) -> int:
+        return titles.index(name)
+
+    assert index("Обследовать существующее ext4 подключение по UUID без записи") < (
+        index("Зарегистрировать только доказанные существующие ФС в OMV"))
+    assert index("Не принимать чужой mount или перенос ext4 в другой каталог") < (
+        index("Зарегистрировать только доказанные существующие ФС в OMV"))
+    assert index("Зарегистрировать только доказанные существующие ФС в OMV") < (
+        index("Подключить только уже существующий ext4 через запись OMV fstab"))
+    assert index("Не накрывать чужие файлы при подключении существующего ext4") < (
+        index("Подключить только уже существующий ext4 через запись OMV fstab"))
+    assert index("Убедиться, что fstab подключит именно подтверждённый ext4 UUID") < (
+        index("Подключить только уже существующий ext4 через запись OMV fstab"))
+    assert index("Подключить только уже существующий ext4 через запись OMV fstab") < (
+        index("Независимо подтвердить конечный mount UUID после OMV"))
+    assert index("Проверить подключение именно нашего HDD, а не системного SSD") < (
+        index("Однократно сохранить только независимо проверенные тома"))
+
+    commands = [
+        (task, task["ansible.builtin.command"]["argv"])
+        for task in tasks if "ansible.builtin.command" in task
+    ]
+    for task, argv in commands:
+        assert argv[0] in ("findmnt", "zpool", "mount"), task["name"]
+        assert argv[:2] not in (["zpool", "create"], ["zpool", "destroy"]), argv
+        if argv[0] == "mount":
+            assert task.get("when") == "nas_adopt_shared_after_omv.rc == 1"
+            assert len(argv) == 2
+    assert "nas_adopt_shared_unmounted_files.matched" in str(tasks)
+    assert "nas_adopt_shared_fstab.stdout.split()" in str(tasks)
+    assert "'UUID=' ~ nas_adopt_shared_disk.children[0].uuid" in str(tasks)
+    assert "nas_adopt_shared_target_stat.stat.islnk" in str(tasks)
+    assert not any("ansible.builtin.script" in task for task in tasks)
+
+
 def test_recreate_preflight_is_strictly_non_destructive() -> None:
     """Reinitialize intent never means that a mount or system disk is safe."""
     tasks = read("prepare-recreate-preflight.yml")
@@ -644,6 +717,8 @@ def test_item_key_never_collides_with_dict_method() -> None:
 
 
 if __name__ == "__main__":
+    test_production_nas_deploy_is_preserve_only()
+    test_adopt_ext4_can_mount_only_after_verified_omv_fstab()
     test_recreate_preflight_is_strictly_non_destructive()
     test_recreate_refuses_nested_system_root()
     test_one_shot_journal()

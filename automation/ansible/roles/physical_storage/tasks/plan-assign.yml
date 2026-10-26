@@ -91,9 +91,12 @@
          else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim)
                | sort(attribute='serial') | list) }}
     chosen: "{{ candidates[0] }}"
+    # Historical completed journals are fingerprinted with their original
+    # actions, but these actions are NEVER published as disk write intent.
+    # With no pending journal every role is preserve, even on blank media.
     action: >-
       {{ 'recreate' if (
            declared_disk.role != 'system'
            and not (physical_plan_previous.stat.exists | default(false))
-           and declared_disk.id in (physical_storage.initialization.recreate_once | default([]))
+           and (physical_plan_previous_journal.stat.exists | default(false))
          ) else 'preserve' }}

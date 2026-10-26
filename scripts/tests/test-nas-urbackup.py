@@ -37,7 +37,6 @@ def module(path: str, name: str):
 guard = module("nas-urbackup-safe.py", "nas_urbackup_guard_test")
 snapshot = module("nas-urbackup-snapshot.py", "nas_urbackup_snapshot_test")
 recovery = module("nas-urbackup-recovery.py", "nas_urbackup_recovery_test")
-retention = module("nas-urbackup-policy.py", "nas_urbackup_policy_test")
 
 
 def refuses(cb, cls=Exception):
@@ -471,74 +470,85 @@ def test_mount_failure_output_has_no_arbitrary_stderr():
 
 
 def test_client_scoped_urbackup_archival_policy() -> None:
-    """Never change unrelated clients or global server retention."""
-    d = retention.desired_rules(7, 4)
-    assert d["every_c0"] == "86400" and d["for_c0"] == str(7 * 86400)
-    assert d["every_c1"] == "604800" and d["for_c1"] == str(4 * 604800)
-    assert d["backup_type_c0"] == d["backup_type_c1"] == "file"
-    refuses(lambda: retention.desired_rules(0, 4), retention.PolicyError)
-    refuses(lambda: retention.desired_rules(7, 0), retention.PolicyError)
-    refuses(lambda: retention.normalized_archive("archive=1&archive=2"), retention.PolicyError)
+    """Native Ansible reconciles only nas-local, without stored Python drivers."""
+    from subprocess import run
 
-    config = {
-        "client_name": "nas-local", "admin_user": "admin", "web_port": 55414,
-        "keep_daily": 7, "keep_weekly": 4, "max_parallel_jobs": 1,
-    }
-    with tempfile.TemporaryDirectory() as td:
-        cfg = Path(td) / "retention.json"
-        cfg.write_text(json.dumps(config), encoding="utf-8")
-        assert retention.read_config(cfg) == config
-        cfg.write_text(json.dumps({**config, "web_port": 55415}), encoding="utf-8")
-        refuses(lambda: retention.read_config(cfg), retention.PolicyError)
+    root = ROOT / "automation/ansible/roles/nas"
+    source = (root / "tasks/urbackup-retention.yml").read_text(encoding="utf-8")
+    tasks = yaml.safe_load(source)
+    assert len(tasks) >= 22
+    assert not (root / "files/nas-urbackup-policy.py").exists()
+    client = yaml.safe_load((root / "tasks/urbackup_client.yml").read_text(encoding="utf-8"))
+    assert any(
+        task.get("ansible.builtin.include_tasks") == "urbackup-retention.yml"
+        for task in client
+    )
+    assert "nas-urbackup-policy, apply" not in str(client)
+    assert "nas-urbackup-policy, verify" not in str(client)
+    assert "retention.json" not in str(client).split("Удалить дублирующий")[0]
 
-    class Server:
-        def __init__(self, initial="", use=1, *, registered=True):
-            self.archive = initial
-            self.use = use
-            self.registered = registered
-            self.calls = []
-
-        def request(self, action, payload=None):
-            self.calls.append((action, dict(payload or {})))
-            if action == "status":
-                return {"status": [
-                    {"name": "other-machine", "id": 4},
-                    *([{"name": "nas-local", "id": 12}] if self.registered else []),
-                ]}
-            if action == "settings" and payload["sa"] == "clientsettings":
-                assert payload["t_clientid"] == "12"
-                return {"settings": {"archive": {"value": self.archive, "use": self.use}}}
-            if action == "settings" and payload["sa"] == "clientsettings_save":
-                assert payload["t_clientid"] == "12"
-                assert payload["archive.use"] == "2"
-                assert set(payload) == {"sa", "t_clientid", "archive", "archive.use", "overwrite"}
-                assert payload["overwrite"] == "true"
-                self.archive, self.use = payload["archive"], 2
-                return {"saved_ok": True}
-            raise AssertionError("Unexpected or unsafe UrBackup API call")
-
-    first = Server()
-    refuses(lambda: retention.reconcile(first, config, apply=False), retention.PolicyError)
-    assert all(call[1].get("sa") != "clientsettings_save" for call in first.calls)
-    assert retention.reconcile(first, config, apply=True) is True
-    assert retention.reconcile(first, config, apply=False) is False
-    assert retention.reconcile(first, config, apply=True) is False
-    assert retention.normalized_archive(first.archive) == d
-    assert all(call[1].get("sa") not in ("general", "general_save")
-               for call in first.calls)
-    assert all(call[1].get("t_clientid", "12") == "12" for call in first.calls)
-    conflict = Server(initial="every_c0=42", use=2)
-    refuses(lambda: retention.reconcile(conflict, config, apply=True), retention.PolicyError)
-    assert not any(call[1].get("sa") == "clientsettings_save" for call in conflict.calls)
-    refuses(lambda: retention.reconcile(Server(registered=False), config, apply=True),
-            retention.PolicyError)
-    tasks = yaml.safe_load((ROOT / "automation/ansible/roles/nas/tasks/urbackup_client.yml").read_text())
-    assert any(task.get("ansible.builtin.command", {}).get("argv") ==
-               ["/usr/local/sbin/nas-urbackup-policy", "apply"]
+    urls = [
+        task for task in tasks if "ansible.builtin.uri" in task
+    ]
+    assert len(urls) >= 7
+    assert all(
+        task["ansible.builtin.uri"]["url"].startswith(
+            "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a="
+        )
+        and task["ansible.builtin.uri"]["method"] == "POST"
+        and task["ansible.builtin.uri"]["body_format"] == "form-urlencoded"
+        and task["ansible.builtin.uri"]["use_proxy"] is False
+        and task["ansible.builtin.uri"]["follow_redirects"] == "none"
+        and task["ansible.builtin.uri"]["status_code"] == 200
+        and task.get("no_log") is True
+        for task in urls
+    )
+    saves = [
+        task for task in urls
+        if task["ansible.builtin.uri"]["body"].get("sa") == "clientsettings_save"
+    ]
+    assert len(saves) == 1
+    save = saves[0]
+    assert save["when"] == "not (nas_retention_matches | bool)"
+    assert save["ansible.builtin.uri"]["body"]["archive.use"] == "2"
+    assert save["ansible.builtin.uri"]["body"]["overwrite"] == "true"
+    assert save["ansible.builtin.uri"]["body"]["t_clientid"] == (
+        "{{ nas_retention_clients[0].id | string }}"
+    )
+    assert not any(
+        task["ansible.builtin.uri"]["body"].get("sa") in ("general", "general_save")
+        for task in urls
+    )
+    assert any("nas_retention_clients | length == 1" in str(task)
                for task in tasks)
-    assert any(task.get("ansible.builtin.command", {}).get("argv") ==
-               ["/usr/local/sbin/nas-urbackup-policy", "verify"]
+    assert any("nas_retention_actual_parts | length == 0" in str(task)
                for task in tasks)
+    assert any("nas_retention_desired_parts" in str(task)
+               for task in tasks)
+    assert any("nas_retention_verified_archive" in str(task)
+               for task in tasks)
+    assert all("ansible.builtin.script" not in task and
+               "ansible.builtin.shell" not in task for task in tasks)
+
+    kdf = next(task for task in tasks if task.get("register") == "nas_retention_pbkdf2")
+    argv = kdf["ansible.builtin.command"]["argv"]
+    assert argv[:2] == ["openssl", "kdf"]
+    assert argv[-1] == "PBKDF2"
+    assert kdf["no_log"] is True
+    assert kdf["when"] == "nas_retention_salt.pbkdf2_rounds | default(0) | int > 0"
+    # KDF command must match UrBackup's Python protocol and raw binary MD5 input.
+    import hashlib
+    digest = hashlib.md5(b"saltpassword").hexdigest()
+    args = [
+        "openssl", "kdf", "-keylen", "32", "-kdfopt", "digest:SHA256",
+        "-kdfopt", "hexpass:" + digest, "-kdfopt", "salt:salt",
+        "-kdfopt", "iter:1000", "PBKDF2",
+    ]
+    result = run(args, text=True, capture_output=True, check=True)
+    actual = result.stdout.replace(":", "").strip().lower()
+    expected = hashlib.pbkdf2_hmac("sha256", bytes.fromhex(digest), b"salt", 1000).hex()
+    assert actual == expected
+
 
 def test_deploy_uses_ansible_for_urbackup_setup() -> None:
     """Runtime executors can remain, but deployment must not call their setup modes."""

@@ -122,42 +122,20 @@
   until: nas_urbackup_client_ready.rc == 0
   changed_when: false
 
-# Client-specific archive rules must not modify global settings or other
-# (future Windows/PVE) clients. No backup file is removed by this operation.
-- name: Сохранить декларацию хранения только локального клиента UrBackup
-  ansible.builtin.copy:
-    dest: /etc/nas-apps/urbackup/retention.json
-    owner: root
-    group: root
-    mode: "0600"
-    content: |
-      {{ {
-        'client_name': nas_backup_policy.local_client.name,
-        'admin_user': nas_backup_policy.server.admin_user,
-        'web_port': nas_backup_policy.server.web_port,
-        'keep_daily': nas_backup_policy.retention.keep_daily,
-        'keep_weekly': nas_backup_policy.retention.keep_weekly,
-        'max_parallel_jobs': nas_backup_policy.retention.max_parallel_jobs
-      } | to_nice_json }}
+# All policy interactions are handled by native Ansible via authenticated
+# localhost API; runtime ZFS snapshot/recovery tools remain independent.
+- name: Согласовать архивирование nas-local с backup.yaml через Ansible
+  ansible.builtin.include_tasks: urbackup-retention.yml
 
-- name: Установить безопасный исполнитель политики UrBackup
-  ansible.builtin.copy:
-    src: nas-urbackup-policy.py
-    dest: /usr/local/sbin/nas-urbackup-policy
-    owner: root
-    group: root
-    mode: "0750"
+- name: Удалить устаревший Python API-адаптер без изменения архивов
+  ansible.builtin.file:
+    path: /usr/local/sbin/nas-urbackup-policy
+    state: absent
 
-- name: Применить и прочитать обратно архивирование только nas-local
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-policy, apply]
-  register: nas_client_retention
-  changed_when: "'URBACKUP_POLICY_CHANGED:' in nas_client_retention.stdout"
-
-- name: Подтвердить применение политики на сервере UrBackup
-  ansible.builtin.command:
-    argv: [/usr/local/sbin/nas-urbackup-policy, verify]
-  changed_when: false
+- name: Удалить дублирующий локальный JSON после успешного перехода
+  ansible.builtin.file:
+    path: /etc/nas-apps/urbackup/retention.json
+    state: absent
 
 - name: Установить локальное задание резервирования ZFS
   ansible.builtin.template:

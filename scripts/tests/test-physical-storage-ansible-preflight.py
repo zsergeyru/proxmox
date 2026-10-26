@@ -113,14 +113,19 @@ def test_jq_refuses_system_disk() -> None:
     assert not jq(filters[0]), "Unknown root disk must refuse admission"
 
 
-def test_preflight_runs_before_legacy_writer() -> None:
-    source = (
+def test_production_has_no_legacy_python_disk_writer() -> None:
+    assert not (
         ROOT / "scripts/infra-manager/infra_manager/physical_nas_storage_prepare.py"
+    ).exists()
+    assert not (
+        ANSIBLE / "roles/nas/files/nas-storage-prepare.py"
+    ).exists()
+    deploy = (
+        ANSIBLE / "playbooks/prepare-nas-storage.yml"
     ).read_text(encoding="utf-8")
-    assert source.index('operation="prepare-preflight"') < (
-        source.index('"python3 /usr/local/sbin/nas-storage-prepare"')
-    )
-    assert "if pending is None:" in source
+    assert "initialize-blank.yml" not in deploy
+    assert "prepare-create-complete.yml" not in deploy
+    assert "prepare-write.yml" not in deploy
     universal = (
         ROOT / "scripts/infra-manager/infra_manager/physical_host_ansible.py"
     ).read_text(encoding="utf-8")
@@ -169,20 +174,17 @@ def test_recovery_inspector_cannot_format_hdds() -> None:
         "name": "physical_storage",
         "tasks_from": "prepare-recover-inspect.yml",
     }
-    source = (
-        ROOT / "scripts/infra-manager/infra_manager/physical_nas_storage_prepare.py"
+    entry = (
+        ANSIBLE / "playbooks/prepare-nas-storage.yml"
     ).read_text(encoding="utf-8")
-    assert 'if pending is not None and all(' in source
-    assert 'operation="recover-inspect"' in source
-    assert source.index('operation="recover-inspect"') < (
-        source.index('"python3 /usr/local/sbin/nas-storage-prepare"')
-    )
-    assert '" recover" if pending is not None else ""' in source
+    assert "prepare-recover-complete.yml" in entry
+    assert "prepare-write.yml" not in entry
+    assert "initialize-blank.yml" not in entry
 
 
 if __name__ == "__main__":
     test_preflight_has_no_disk_writes()
     test_jq_refuses_system_disk()
-    test_preflight_runs_before_legacy_writer()
+    test_production_has_no_legacy_python_disk_writer()
     test_recovery_inspector_cannot_format_hdds()
     print("[ОК] Ansible HDD preparation preflight is read-only and fail-closed")

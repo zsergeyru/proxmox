@@ -31,22 +31,48 @@
       - nas_adopt_shared_disk.pttype == 'gpt'
     fail_msg: Общий HDD не является подтверждённым ext4
 
-- name: Проверить реальный ext4 mount по проверенному UUID
+- name: Обследовать существующее ext4 подключение по UUID без записи
   ansible.builtin.command:
     argv: [findmnt, --json, --source, "UUID={{ nas_adopt_shared_disk.children[0].uuid }}", --output, TARGET,SOURCE,FSTYPE,UUID]
-  register: nas_adopt_shared_mount
+  register: nas_adopt_shared_before
   changed_when: false
+  failed_when: false
 
-- name: Запретить неизвестную точку подключения ext4
+- name: Найти все существующие подключения у ожидаемого каталога OMV
+  ansible.builtin.command:
+    argv: [findmnt, --json, --mountpoint, "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}", --output, TARGET,SOURCE,FSTYPE,UUID]
+  register: nas_adopt_shared_target_before
+  changed_when: false
+  failed_when: false
+
+- name: Не принимать чужой mount или перенос ext4 в другой каталог
   ansible.builtin.assert:
     that:
-      - mounts | length == 1
-      - mounts[0].target == '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid
-      - mounts[0].fstype == 'ext4'
-      - mounts[0].uuid == nas_adopt_shared_disk.children[0].uuid
-    fail_msg: Ext4 отсутствует или смонтирован в чужой каталог
+      - nas_adopt_shared_before.rc in [0, 1]
+      - nas_adopt_shared_target_before.rc in [0, 1]
+      - >-
+        nas_adopt_shared_before.rc != 0
+        or (
+          source_mounts | length == 1
+          and source_mounts[0].target == '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid
+          and source_mounts[0].fstype == 'ext4'
+          and source_mounts[0].uuid == nas_adopt_shared_disk.children[0].uuid
+        )
+      - >-
+        nas_adopt_shared_target_before.rc != 0
+        or (
+          target_mounts | length == 1
+          and target_mounts[0].fstype == 'ext4'
+          and target_mounts[0].uuid == nas_adopt_shared_disk.children[0].uuid
+        )
+    fail_msg: Ext4 подключён не туда либо каталог OMV занят чужим томом
   vars:
-    mounts: "{{ (nas_adopt_shared_mount.stdout | from_json).filesystems | default([]) }}"
+    source_mounts: >-
+      {{ (nas_adopt_shared_before.stdout | from_json).filesystems | default([])
+         if nas_adopt_shared_before.rc == 0 else [] }}
+    target_mounts: >-
+      {{ (nas_adopt_shared_target_before.stdout | from_json).filesystems | default([])
+         if nas_adopt_shared_target_before.rc == 0 else [] }}
 
 - name: Прочитать владельцев двух ZFS-пулов без изменения
   ansible.builtin.command:
@@ -133,6 +159,99 @@
 
 - name: Зарегистрировать только доказанные существующие ФС в OMV
   ansible.builtin.include_tasks: adopt-omv.yml
+
+# OMV manages the fstab entry; a previously formatted but not yet mounted
+# shared disk may be mounted by its exact OMV-generated entry only after
+# read-only proof that the target is safe and has no hidden files.
+- name: Проверить фактическое подключение ext4 после регистрации OMV
+  ansible.builtin.command:
+    argv: [findmnt, -n, -M, "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}", -o, TARGET]
+  register: nas_adopt_shared_after_omv
+  changed_when: false
+  failed_when: false
+
+- name: Проверить тип подготовленного OMV каталога до возможного mount
+  ansible.builtin.stat:
+    path: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+    follow: false
+  register: nas_adopt_shared_target_stat
+
+- name: Запретить неготовое или подменённое место подключения
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_shared_after_omv.rc in [0, 1]
+      - >-
+        nas_adopt_shared_after_omv.rc != 0
+        or nas_adopt_shared_after_omv.stdout | trim
+           == '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid
+      - nas_adopt_shared_target_stat.stat.isdir | default(false)
+      - not (nas_adopt_shared_target_stat.stat.islnk | default(false))
+    fail_msg: OMV не подготовила однозначный каталог для ext4
+
+- name: Проверить содержимое несмонтированного каталога без скрытия файлов
+  ansible.builtin.find:
+    paths: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+    recurse: false
+    hidden: true
+    file_type: any
+  register: nas_adopt_shared_unmounted_files
+  when: nas_adopt_shared_after_omv.rc == 1
+
+- name: Не накрывать чужие файлы при подключении существующего ext4
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_shared_unmounted_files.matched | int == 0
+    fail_msg: Ожидаемый mountpoint содержит файлы, автоматическое подключение запрещено
+  when: nas_adopt_shared_after_omv.rc == 1
+
+- name: Прочитать ровно ту fstab-запись, которую сгенерировала OMV
+  ansible.builtin.command:
+    argv:
+      - findmnt
+      - --fstab
+      - -n
+      - -M
+      - "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+      - -o
+      - SOURCE,FSTYPE
+  register: nas_adopt_shared_fstab
+  changed_when: false
+  when: nas_adopt_shared_after_omv.rc == 1
+
+- name: Убедиться, что fstab подключит именно подтверждённый ext4 UUID
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_shared_fstab.stdout.split() | length == 2
+      - nas_adopt_shared_fstab.stdout.split()[1] == 'ext4'
+      - nas_adopt_shared_fstab.stdout.split()[0] in [
+          'UUID=' ~ nas_adopt_shared_disk.children[0].uuid,
+          '/dev/disk/by-uuid/' ~ nas_adopt_shared_disk.children[0].uuid
+        ]
+    fail_msg: Fstab OMV указывает не на проверенный раздел ext4
+  when: nas_adopt_shared_after_omv.rc == 1
+
+- name: Подключить только уже существующий ext4 через запись OMV fstab
+  ansible.builtin.command:
+    argv: [mount, "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"]
+  when: nas_adopt_shared_after_omv.rc == 1
+  changed_when: true
+
+- name: Независимо подтвердить конечный mount UUID после OMV
+  ansible.builtin.command:
+    argv: [findmnt, --json, --source, "UUID={{ nas_adopt_shared_disk.children[0].uuid }}", --output, TARGET,SOURCE,FSTYPE,UUID]
+  register: nas_adopt_shared_mount
+  changed_when: false
+
+- name: Проверить подключение именно нашего HDD, а не системного SSD
+  ansible.builtin.assert:
+    that:
+      - mounts | length == 1
+      - mounts[0].target == '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid
+      - mounts[0].fstype == 'ext4'
+      - mounts[0].uuid == nas_adopt_shared_disk.children[0].uuid
+    fail_msg: Конечное ext4 подключение не подтверждено, состояние не сохраняется
+  vars:
+    mounts: "{{ (nas_adopt_shared_mount.stdout | from_json).filesystems | default([]) }}"
 
 - name: Построить подтверждённые тома для постоянного состояния 910
   ansible.builtin.set_fact:

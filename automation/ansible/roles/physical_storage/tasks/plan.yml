@@ -129,6 +129,17 @@
       - physical_plan_assignments[0].role == 'system'
     fail_msg: Невозможно подтвердить полное назначение накопителей
 
+- name: Запретить создание и очистку дисков при любой неполной разметке
+  ansible.builtin.assert:
+    that:
+      - physical_plan_layout_ready | bool
+      - >-
+        (physical_plan_assignments | map(attribute='action') | unique | list == ['preserve'])
+        or (physical_plan_previous_journal.stat.exists | default(false))
+    fail_msg: >-
+      На NAS не подтверждены все существующие ext4/ZFS.
+      Deploy не форматирует и не очищает HDD. Проверьте диски и монтирования.
+
 - name: Сохранить исходный fingerprint до изменения действий на preserve
   ansible.builtin.set_fact:
     physical_plan_original_fingerprint: >-
