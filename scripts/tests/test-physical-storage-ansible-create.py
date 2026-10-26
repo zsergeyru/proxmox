@@ -123,8 +123,17 @@ def test_recovery_is_strictly_read_only() -> None:
             assert argv[0] in {"lsblk", "jq", "blkid", "zpool"}
             if argv[0] == "zpool":
                 assert argv[1] in {"status", "get"}
+    # Only the dedicated *read-only* inspection playbook may use this
+    # role. In particular, the journal creator and filesystem writer
+    # must remain disconnected from recovery and normal deployment.
     for p in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
-        assert "prepare-recover-inspect.yml" not in p.read_text(encoding="utf-8")
+        source = p.read_text(encoding="utf-8")
+        if "prepare-recover-inspect.yml" in source:
+            assert p.name == "inspect-physical-storage-recovery.yml", p
+            assert "prepare-write.yml" not in source, p
+            assert "prepare-journal.yml" not in source, p
+    entry = (ROOT / "automation/ansible/playbooks/inspect-physical-storage-recovery.yml")
+    assert "tasks_from: prepare-recover-inspect.yml" in entry.read_text(encoding="utf-8")
 
 
 def test_item_key_never_collides_with_dict_method() -> None:
