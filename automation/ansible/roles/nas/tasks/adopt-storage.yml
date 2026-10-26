@@ -157,6 +157,45 @@
   loop_control:
     label: "{{ item.id }}"
 
+# omv-salt deploy run fstab may perform a mount itself, so check the
+# unmounted target BEFORE OMV is permitted to regenerate /etc/fstab.
+- name: Проверить исходный каталог ext4 до любых операций OMV
+  ansible.builtin.stat:
+    path: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+    follow: false
+  register: nas_adopt_shared_target_initial
+  when: nas_adopt_shared_before.rc == 1
+
+- name: Не допустить OMV к ссылке или файлу вместо каталога ext4
+  ansible.builtin.assert:
+    that:
+      - not (nas_adopt_shared_target_initial.stat.islnk | default(false))
+      - >-
+        not (nas_adopt_shared_target_initial.stat.exists | default(false))
+        or nas_adopt_shared_target_initial.stat.isdir | default(false)
+    fail_msg: Небезопасный исходный каталог ext4; OMV не вызывается
+  when: nas_adopt_shared_before.rc == 1
+
+- name: Найти скрываемые файлы в ещё не подключённом каталоге ext4
+  ansible.builtin.find:
+    paths: "/srv/dev-disk-by-uuid-{{ nas_adopt_shared_disk.children[0].uuid }}"
+    recurse: false
+    hidden: true
+    file_type: any
+  register: nas_adopt_shared_target_initial_contents
+  when:
+    - nas_adopt_shared_before.rc == 1
+    - nas_adopt_shared_target_initial.stat.exists | default(false)
+
+- name: Запретить генерацию fstab поверх файлов в каталоге ext4
+  ansible.builtin.assert:
+    that:
+      - nas_adopt_shared_target_initial_contents.matched | int == 0
+    fail_msg: Каталог ext4 содержит файлы; OMV не разрешено скрывать их монтированием
+  when:
+    - nas_adopt_shared_before.rc == 1
+    - nas_adopt_shared_target_initial.stat.exists | default(false)
+
 - name: Зарегистрировать только доказанные существующие ФС в OMV
   ansible.builtin.include_tasks: adopt-omv.yml
 
