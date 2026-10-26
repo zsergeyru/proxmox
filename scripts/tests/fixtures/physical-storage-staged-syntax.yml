@@ -60,3 +60,8 @@
       ansible.builtin.import_role:
         name: nas
         tasks_from: prepare-recover-complete.yml
+
+    - name: Проверить порядок отключённого первого создания
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: prepare-create-complete.yml
