@@ -15,7 +15,7 @@ class CallbackModule(CallbackBase):
     CALLBACK_NAME = "infra_storage_plan"
 
     def v2_runner_on_ok(self, result):
-        if result._task.get_name() != "Опубликовать план только через allowlisted stdout callback":
+        if not str(result._task.get_name()).endswith("Опубликовать план только через allowlisted stdout callback"):
             return
         raw = result._result.get("msg")
         prefix = "PHYSICAL_STORAGE_PLAN_JSON="
