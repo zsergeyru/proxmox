@@ -377,8 +377,15 @@ def test_omv_fstab_stage_guards_existing_data() -> None:
         assert not any(key in item for key in (
             "ansible.builtin.shell", "ansible.builtin.raw",
             "ansible.builtin.script", "ansible.builtin.copy",
-            "ansible.builtin.mount", "ansible.builtin.file",
+            "ansible.builtin.mount",
         )), item.get("name")
+        if "ansible.builtin.file" in item:
+            guarded = item["ansible.builtin.file"]
+            assert guarded["path"] == "{{ nas_omv_expected_mounts[0].dir }}"
+            assert guarded["state"] == "directory"
+            assert guarded["follow"] is False
+            assert any("nas_omv_expected_mounts[0].dir is match" in x
+                       for x in item["when"])
         if "ansible.builtin.command" in item:
             argv = item["ansible.builtin.command"]["argv"]
             assert argv[0] in {"findmnt", "omv-salt", "mount"}
@@ -574,7 +581,11 @@ def test_disabled_first_create_is_journal_first_and_unreachable() -> None:
     for role in (ROOT / "automation/ansible/roles").rglob("*.yml"):
         if role == path:
             continue
-        assert "prepare-create-complete.yml" not in role.read_text(), role
+        content = role.read_text()
+        if role.name == "initialize-blank.yml":
+            assert "include_tasks: prepare-create-complete.yml" in content
+        else:
+            assert "prepare-create-complete.yml" not in content, role
 
 
 def read_omv_register() -> list:
