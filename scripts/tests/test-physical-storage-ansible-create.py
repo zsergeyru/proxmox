@@ -2,6 +2,8 @@
 """Contracts for staged native Ansible disk creation without production cutover."""
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -54,6 +56,36 @@ def test_recreate_preflight_is_strictly_non_destructive() -> None:
     # interruption-safe state machine has been verified.
     for playbook in (ROOT / "automation/ansible/playbooks").rglob("*.yml"):
         assert "prepare-recreate-preflight.yml" not in playbook.read_text(), playbook
+
+
+def test_recreate_refuses_nested_system_root() -> None:
+    """The selected serial must not own /, even when root is nested in LVM."""
+    tasks = read("prepare-recreate-preflight.yml")
+    checks = [
+        task["ansible.builtin.command"]["argv"][-1]
+        for task in tasks
+        if task.get("ansible.builtin.command", {}).get("argv", [""])[0] == "jq"
+        and "--arg" in task["ansible.builtin.command"]["argv"]
+    ]
+    assert len(checks) == 1
+    disk_tree = json.dumps({"blockdevices": [
+        {"type": "disk", "serial": "SYSTEM", "mountpoints": [None], "children": [
+            {"type": "part", "mountpoints": [None], "children": [
+                {"type": "lvm", "mountpoints": ["/"]}
+            ]}
+        ]},
+        {"type": "disk", "serial": "SHARED", "mountpoints": [None]},
+        {"type": "disk", "serial": "DATA", "mountpoints": ["/nas-data"]},
+    ]})
+    def check(serial: str) -> int:
+        result = subprocess.run(
+            ["jq", "-e", "--arg", "serial", serial, checks[0]],
+            input=disk_tree, text=True, capture_output=True, check=False,
+        )
+        return result.returncode
+    assert check("SYSTEM") != 0, "The root disk was approved for recreation"
+    assert check("SHARED") == 0
+    assert check("DATA") == 0
 
 
 def test_one_shot_journal() -> None:
@@ -568,6 +600,7 @@ def test_item_key_never_collides_with_dict_method() -> None:
 
 if __name__ == "__main__":
     test_recreate_preflight_is_strictly_non_destructive()
+    test_recreate_refuses_nested_system_root()
     test_one_shot_journal()
     test_write_stage_is_gated_and_not_connected()
     test_item_key_never_collides_with_dict_method()
