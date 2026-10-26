@@ -110,6 +110,14 @@ jobs:
       - name: Check isolated one-shot HDD journal and native filesystem stage
         run: python scripts/tests/test-physical-storage-ansible-create.py
 
+      - name: Check staged Ansible roles with pinned ansible-core (syntax only)
+        run: |
+          python -m pip install --disable-pip-version-check ansible-core==2.19.4
+          ANSIBLE_ROLES_PATH=automation/ansible/roles \
+            ansible-playbook --syntax-check \
+              -i localhost, -c local \
+              scripts/tests/fixtures/physical-storage-staged-syntax.yml
+
       - name: Check Debian, OMV and NAS volume guards
         run: python scripts/tests/test-physical-nas-system.py
 
