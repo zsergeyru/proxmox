@@ -214,6 +214,45 @@ def test_driverless_physical_operations_route_to_ansible() -> None:
         assert calls[0]["variables"]["physical_disk_recreate_authorized"] is True
 
 
+def test_no_runtime_driver_or_service_specific_dispatch() -> None:
+    """The generic controller must not execute host-owned Python plugins."""
+    root = ROOT / "scripts/infra-manager"
+    assert not (root / "drivers/omv8.py").exists()
+    assert not (root / "infra_manager/physical_host_drivers.py").exists()
+    generic_sources = [
+        root / "infra_manager/physical_hosts.py",
+        root / "infra_manager/physical_host_operations.py",
+        root / "infra_manager/physical_host_ansible.py",
+    ]
+    for source in generic_sources:
+        body = source.read_text(encoding="utf-8")
+        for forbidden in (
+            "importlib.util", "run_host_driver", "physical_host_drivers",
+            "physical_nas_", "run_nas_phase", "omv8.py",
+        ):
+            assert forbidden not in body, (source, forbidden)
+    operations = yaml.safe_load(
+        (ROOT / "infrastructure/hosts/nas/host.yaml").read_text(encoding="utf-8")
+    )
+    assert operations["management"]["engine"] == "ansible"
+    assert operations["management"]["phases"] == ["base", "services"]
+    for name in ("deploy", "status", "plan-nas-storage", "prepare-nas-storage"):
+        filename = (
+            f"{name}-nas.yml" if name in ("deploy", "status")
+            else name + ".yml"
+        )
+        assert (ROOT / "automation/ansible/playbooks" / filename).is_file()
+    # No additional operator-facing commands. Stages are routed only inside
+    # deploy from the PVE wrapper, with exact fingerprint approval.
+    code = (root / "infra_manager/operator.py").read_text(encoding="utf-8")
+    for forbidden in (
+        'subparsers.add_parser("inspect"',
+        'subparsers.add_parser("storage-plan"',
+        'subparsers.add_parser("storage-prepare"',
+    ):
+        assert forbidden not in code
+
+
 def test_driver_is_not_used_for_schema_or_inspect() -> None:
     parser = (
         ROOT / "scripts/infra-manager/infra_manager/physical_hosts.py"
@@ -234,5 +273,6 @@ if __name__ == "__main__":
     test_native_disk_read_only_contract()
     test_driverless_physical_operations_route_to_ansible()
     test_driver_is_not_used_for_schema_or_inspect()
+    test_no_runtime_driver_or_service_specific_dispatch()
     test_initial_ssh_trust_is_generic()
     print("[ОК] Universal Ansible physical host and read-only disk preflight")
