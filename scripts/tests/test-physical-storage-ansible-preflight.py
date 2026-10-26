@@ -158,8 +158,8 @@ def test_recovery_inspector_cannot_format_hdds() -> None:
     assert {"lsblk", "jq", "blkid", "zpool"} <= set(commands)
     content = recovery.read_text(encoding="utf-8")
     assert "physical_recovery_journal.state == 'started'" in content
-    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in content
-    assert "physical_disk_intent.mode == 'recover'" in content
+    assert "physical_recovery_journal['items'] == physical_recovery_intent['items']" in content
+    assert "physical_recovery_intent.mode == 'recover'" in content
     playbook = yaml.safe_load(
         (ANSIBLE / "playbooks/inspect-physical-storage-recovery.yml").read_text()
     )
