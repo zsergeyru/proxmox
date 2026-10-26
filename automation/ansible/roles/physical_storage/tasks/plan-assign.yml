@@ -49,7 +49,7 @@
            or (
              declared_disk.role not in ['system', 'shared']
              and (
-               chosen.fstype == 'zfs_member'
+               (chosen.fstype | default(none)) == 'zfs_member'
                or (
                  chosen.children | default([], true)
                  | selectattr('fstype', 'equalto', 'zfs_member')
