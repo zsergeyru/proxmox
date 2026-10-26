@@ -12,11 +12,11 @@
       - physical_disk_intent.host == physical_host_name
       - physical_disk_intent.mode == 'first-create'
       - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
-      - physical_disk_intent.items is sequence
-      - physical_disk_intent.items | length == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | list | length)
-      - physical_disk_intent.items | map(attribute='role') | list | sort == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | map(attribute='role') | list | sort)
-      - physical_disk_intent.items | map(attribute='role') | unique | list | length == physical_disk_intent.items | length
-      - physical_disk_intent.items | map(attribute='serial') | unique | list | length == physical_disk_intent.items | length
+      - physical_disk_intent['items'] is sequence
+      - physical_disk_intent['items'] | length == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | list | length)
+      - physical_disk_intent['items'] | map(attribute='role') | list | sort == (physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | map(attribute='role') | list | sort)
+      - physical_disk_intent['items'] | map(attribute='role') | unique | list | length == physical_disk_intent['items'] | length
+      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == physical_disk_intent['items'] | length
       - physical_storage.policies.existing_data == 'preserve'
       - physical_storage.policies.unverified_devices == 'reject_writes'
       - physical_storage.policies.missing_mount == 'reject_writes'
@@ -40,7 +40,7 @@
   vars:
     selected_devices: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
     selected_volumes: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -114,7 +114,7 @@
   vars:
     expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
     disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -137,7 +137,7 @@
          | selectattr('path', 'search', item.serial)
          | rejectattr('path', 'search', '-part[0-9]+$')
          | list }}
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -167,7 +167,7 @@
       {{ physical_preparation_link_targets.results
          | selectattr('item.path', 'search', item.serial)
          | list }}
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -181,7 +181,7 @@
       {{ physical_preparation_link_targets.results
          | selectattr('item.path', 'search', item.serial)
          | list }}
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -196,7 +196,7 @@
       - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
     stdin: "{{ physical_preparation_tree.stdout }}"
     stdin_add_newline: false
-  loop: "{{ physical_disk_intent.items }}"
+  loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
   changed_when: false
@@ -213,7 +213,7 @@
     fail_msg: HDD {{ item.role }} уже содержит разметку, ФС или монтирование
   vars:
     disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
-  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop: "{{ physical_disk_intent['items'] | rejectattr('action', 'equalto', 'preserve') | list }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -225,7 +225,7 @@
       - "{{ disk[0].path }}"
   vars:
     disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
-  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop: "{{ physical_disk_intent['items'] | rejectattr('action', 'equalto', 'preserve') | list }}"
   loop_control:
     label: "{{ item.role }}"
   register: physical_preparation_wipefs
@@ -249,7 +249,7 @@
       - "{{ disk[0].path }}"
   vars:
     disk: "{{ physical_preparation_disks | selectattr('serial', 'equalto', item.serial) | list }}"
-  loop: "{{ physical_disk_intent.items | rejectattr('action', 'equalto', 'preserve') | list }}"
+  loop: "{{ physical_disk_intent['items'] | rejectattr('action', 'equalto', 'preserve') | list }}"
   loop_control:
     label: "{{ item.role }}"
   register: physical_preparation_blkid
