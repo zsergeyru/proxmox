@@ -112,23 +112,6 @@
   loop_control:
     label: "{{ item.item.pool }}"
 
-- name: Построить точные записи OMV из подтверждённых файловых систем
-  ansible.builtin.set_fact:
-    nas_omv_expected_mounts: >-
-      {{ [{
-        'role': 'shared',
-        'fsname': '/dev/disk/by-uuid/' ~ nas_adopt_shared_disk.children[0].uuid,
-        'dir': '/srv/dev-disk-by-uuid-' ~ nas_adopt_shared_disk.children[0].uuid,
-        'type': 'ext4'
-      }] + (
-        physical_storage.volumes
-        | selectattr('kind', 'equalto', 'zfs_pool')
-        | map(attribute='pool')
-        | map('regex_replace', '^(.*)$', '\\1') | list
-        | map('community.general.dict_kv', 'pool') | list
-      ) }}
-  when: false
-
 - name: Сформировать ровно один ожидаемый ext4 mount OMV
   ansible.builtin.set_fact:
     nas_omv_expected_mounts:
