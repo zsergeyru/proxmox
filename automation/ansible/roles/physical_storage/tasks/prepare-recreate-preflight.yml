@@ -7,16 +7,17 @@
     that:
       - physical_storage.initialization is mapping
       - physical_storage.initialization.require_exact_device_confirmation | bool
-      - physical_storage.initialization.recreate_once | sort == ['backup', 'data', 'shared']
+      - physical_storage.initialization.recreate_once | length > 0
+      - physical_storage.initialization.recreate_once | difference(physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | map(attribute='id') | list) | length == 0
       - physical_storage.policies.unverified_devices == 'reject_writes'
       - physical_disk_intent is mapping
       - physical_disk_intent.host == physical_host_name
       - physical_disk_intent.schema_version == 1
       - physical_disk_intent.mode == 'recreate-once'
       - physical_disk_intent.fingerprint is match('^[0-9a-f]{64}$')
-      - physical_disk_intent['items'] | length == 3
+      - physical_disk_intent['items'] | length == physical_storage.initialization.recreate_once | length
       - physical_disk_intent['items'] | map(attribute='role') | list | sort == physical_storage.initialization.recreate_once | sort
-      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == 3
+      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == physical_disk_intent['items'] | length
       - physical_disk_recreate_authorized | default(false) | bool
     fail_msg: Only an explicitly approved plan for the three data disks is allowed
 
