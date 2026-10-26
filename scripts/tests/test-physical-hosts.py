@@ -80,7 +80,10 @@ def check_disk_identity() -> None:
         # the installed OS disk or any unknown physical disk.
         for forbidden in ("system", "unknown", "unused"):
             policy = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
-            policy["initialization"]["recreate_once"] = ["data", forbidden]
+            policy["initialization"] = {
+                "recreate_once": ["data", forbidden],
+                "require_exact_device_confirmation": True,
+            }
             write(host_data, policy)
             try:
                 load_physical_host(root, "nas")
