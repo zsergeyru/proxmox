@@ -50,10 +50,15 @@ def test_generic_ansible_transport() -> None:
             variables={"physical_host_name": "nas"},
             callback="infra_nas_compact",
         )
-    assert len(calls) == 2
+        run_physical_ansible(
+            ROOT, session, operation="recover-inspect",
+            variables={"physical_host_name": "nas"},
+        )
+    assert len(calls) == 3
     assert calls[0][0][0] == "ansible-playbook"
     assert calls[0][0][1].endswith("/inspect-physical-storage.yml")
     assert calls[1][0][1].endswith("/deploy-nas.yml")
+    assert calls[2][0][1].endswith("/inspect-physical-storage-recovery.yml")
     assert calls[0][1]["env"]["ANSIBLE_HOST_KEY_CHECKING"] == "True"
     assert "/run/private/temporary-key" in calls[0][0]
     assert "ansible_ssh_common_args" in calls[0][0][-1]
@@ -71,6 +76,14 @@ def test_generic_ansible_transport() -> None:
     ))
     refuse(lambda: run_physical_ansible(
         ROOT, session, phase="base", callback="../unsafe",
+        variables={"physical_host_name": "nas"},
+    ))
+    refuse(lambda: run_physical_ansible(
+        ROOT, session, operation="recover-inspect", phase="services",
+        variables={"physical_host_name": "nas"},
+    ))
+    refuse(lambda: run_physical_ansible(
+        ROOT, session, operation="prepare-write",
         variables={"physical_host_name": "nas"},
     ))
 
