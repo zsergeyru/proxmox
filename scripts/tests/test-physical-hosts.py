@@ -106,6 +106,7 @@ def check_disk_identity() -> None:
             raise AssertionError("Повторяющийся серийный номер принят")
 
         pinned = yaml.safe_load(storage_path.read_text(encoding="utf-8"))
+        pinned["devices"][1]["serial"] = None
         pinned["devices"][1]["by_id"] = "/dev/disk/by-id/ata-unchecked"
         write(host_data, pinned)
         try:
