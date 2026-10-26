@@ -45,6 +45,46 @@
           '; разделов=' ~ (chosen.children | default([], true) | length | string)
         )
       }] }}
+    physical_plan_layout_ready: >-
+      {{ physical_plan_layout_ready | bool and (
+           declared_disk.role == 'system'
+           or (
+             declared_disk.role == 'shared'
+             and chosen.pttype == 'gpt'
+             and chosen.children | default([], true) | length == 1
+             and (chosen.children | default([], true))[0].fstype == 'ext4'
+             and (chosen.children | default([], true))[0].uuid is match('^[a-fA-F0-9-]{16,40}
+        'role': declared_disk.role,
+        'serial': chosen.serial,
+        'model': chosen.model,
+        'size': chosen.size | int,
+        'action': action
+      }] }}
+  vars:
+    matching: >-
+      {{ physical_plan_available
+         | selectattr('model', 'search', declared_disk.model)
+         | selectattr('size', 'ge', declared_disk.capacity_gb | int * 950000000)
+         | selectattr('size', 'le', declared_disk.capacity_gb | int * 1050000000)
+         | list }}
+    candidates: >-
+      {{ (matching | selectattr('serial', 'equalto', physical_plan_root.stdout | trim) | list)
+         if declared_disk.role == 'system'
+         else (matching | rejectattr('serial', 'equalto', physical_plan_root.stdout | trim) | sort(attribute='serial') | list) }}
+    chosen: "{{ candidates[0] }}"
+    action: >-
+      {{ 'recreate' if (
+           declared_disk.role != 'system'
+           and not (physical_plan_previous.stat.exists | default(false))
+           and declared_disk.id in (physical_storage.initialization.recreate_once | default([]))
+         ) else 'preserve' }}
+)
+           )
+           or (
+             declared_disk.role not in ['system', 'shared']
+             and chosen.fstype == 'zfs_member'
+           )
+         ) }}
     physical_plan_fingerprint_items: >-
       {{ physical_plan_fingerprint_items + [{
         'role': declared_disk.role,
