@@ -58,7 +58,7 @@ def test_generic_ansible_transport() -> None:
     assert calls[0][0][0] == "ansible-playbook"
     assert calls[0][0][1].endswith("/inspect-physical-storage.yml")
     assert calls[1][0][1].endswith("/deploy-nas.yml")
-    assert calls[2][0][1].endswith("/inspect-physical-storage-recovery.yml")
+    assert calls[2][0][1].endswith("/inspect-nas-storage-recovery.yml")
     assert calls[0][1]["env"]["ANSIBLE_HOST_KEY_CHECKING"] == "True"
     assert "/run/private/temporary-key" in calls[0][0]
     assert "ansible_ssh_common_args" in calls[0][0][-1]
