@@ -1,0 +1,86 @@
+---
+# Native Ansible replacement for deploy-time nas-urbackup-client-mount prepare.
+# Only a dedicated empty /run directory is bind-mounted; no HDD is unmounted.
+- name: Проверить существующий staging для ZFS snapshot
+  ansible.builtin.stat:
+    path: /run/nas-urbackup-source
+    follow: false
+  register: nas_urbackup_staging_original
+
+- name: Запретить подмену каталога staging ссылкой или файлом
+  ansible.builtin.assert:
+    that:
+      - not (nas_urbackup_staging_original.stat.islnk | default(false))
+      - not (nas_urbackup_staging_original.stat.exists | default(false)) or nas_urbackup_staging_original.stat.isdir | default(false)
+    fail_msg: Каталог staging UrBackup имеет неожиданный тип
+
+- name: Создать только выделенный каталог staging в tmpfs /run
+  ansible.builtin.file:
+    path: /run/nas-urbackup-source
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Найти только точное mountpoint staging
+  ansible.builtin.command:
+    argv: [findmnt, -n, -M, /run/nas-urbackup-source, -o, TARGET]
+  register: nas_urbackup_staging_mount
+  changed_when: false
+  failed_when: false
+
+- name: Не принимать неоднозначный результат findmnt
+  ansible.builtin.assert:
+    that:
+      - nas_urbackup_staging_mount.rc in [0, 1]
+      - >-
+        (nas_urbackup_staging_mount.rc == 1 and nas_urbackup_staging_mount.stdout | trim == '')
+        or (nas_urbackup_staging_mount.rc == 0
+            and nas_urbackup_staging_mount.stdout | trim == '/run/nas-urbackup-source')
+    fail_msg: Нельзя подтвердить точную точку монтирования staging
+
+- name: Проверить пустоту нового каталога перед self-bind
+  ansible.builtin.find:
+    paths: /run/nas-urbackup-source
+    hidden: true
+    recurse: false
+    file_type: any
+  register: nas_urbackup_staging_contents
+  when: nas_urbackup_staging_mount.rc == 1
+
+- name: Запретить self-bind поверх существующих файлов
+  ansible.builtin.assert:
+    that:
+      - nas_urbackup_staging_contents.matched | int == 0
+    fail_msg: Каталог staging непустой, скрывать файлы монтированием запрещено
+  when: nas_urbackup_staging_mount.rc == 1
+
+- name: Подключить пустой каталог staging сам на себя однократно
+  ansible.builtin.command:
+    argv: [mount, --bind, /run/nas-urbackup-source, /run/nas-urbackup-source]
+  when: nas_urbackup_staging_mount.rc == 1
+  changed_when: true
+
+- name: Прочитать propagation точного staging mount
+  ansible.builtin.command:
+    argv: [findmnt, -n, -M, /run/nas-urbackup-source, -o, PROPAGATION]
+  register: nas_urbackup_staging_propagation
+  changed_when: false
+
+- name: Включить shared propagation, только если оно ещё не установлено
+  ansible.builtin.command:
+    argv: [mount, --make-rshared, /run/nas-urbackup-source]
+  when: nas_urbackup_staging_propagation.stdout | trim != 'shared'
+  changed_when: true
+
+- name: Повторно проверить точное shared mountpoint
+  ansible.builtin.command:
+    argv: [findmnt, -n, -M, /run/nas-urbackup-source, -o, TARGET,PROPAGATION]
+  register: nas_urbackup_staging_final
+  changed_when: false
+
+- name: Подтвердить видимость снимков в постоянном Docker-клиенте
+  ansible.builtin.assert:
+    that:
+      - nas_urbackup_staging_final.stdout.split() == ['/run/nas-urbackup-source', 'shared']
+    fail_msg: Не получено безопасное shared mountpoint для UrBackup

@@ -1,0 +1,203 @@
+---
+# Fail-closed Ansible replacement for the old deploy-time Python mirror helper.
+# APT only: never touches devices, ZFS, users or service data.
+- name: Осмотреть официальный источник APT OMV без перехода по ссылкам
+  ansible.builtin.stat:
+    path: /etc/apt/sources.list.d/openmediavault.list
+    follow: false
+  register: nas_mirror_source_stat
+
+- name: Осмотреть официальный ключ OMV
+  ansible.builtin.stat:
+    path: /usr/share/keyrings/openmediavault-archive-keyring.gpg
+    follow: false
+  register: nas_mirror_key_stat
+
+- name: Осмотреть прежний список зеркал OMV
+  ansible.builtin.stat:
+    path: /etc/apt/mirrors/openmediavault.txt
+    follow: false
+  register: nas_mirror_existing_stat
+
+- name: Осмотреть прежний журнал попытки восстановления APT
+  ansible.builtin.stat:
+    path: /var/lib/infra-manager/omv-apt-mirror-recovery.json
+    follow: false
+  register: nas_mirror_journal_stat
+
+- name: Запретить замену нестандартных файлов APT или повтор без разбора журнала
+  ansible.builtin.assert:
+    that:
+      - nas_mirror_source_stat.stat.isreg | default(false)
+      - not (nas_mirror_source_stat.stat.islnk | default(false))
+      - nas_mirror_key_stat.stat.isreg | default(false)
+      - not (nas_mirror_key_stat.stat.islnk | default(false))
+      - not (nas_mirror_existing_stat.stat.islnk | default(false))
+      - not (nas_mirror_existing_stat.stat.exists | default(false)) or nas_mirror_existing_stat.stat.isreg | default(false)
+      - not (nas_mirror_journal_stat.stat.exists | default(false))
+      - not (nas_mirror_journal_stat.stat.islnk | default(false))
+    fail_msg: Небезопасное состояние репозиториев OMV — ручная проверка обязательна
+
+- name: Сохранить точные исходные байты штатного списка APT
+  ansible.builtin.slurp:
+    src: /etc/apt/sources.list.d/openmediavault.list
+  register: nas_mirror_original_source
+
+- name: Прочитать прежние зеркала, только если они существуют
+  ansible.builtin.slurp:
+    src: /etc/apt/mirrors/openmediavault.txt
+  register: nas_mirror_original_list
+  when: nas_mirror_existing_stat.stat.exists | default(false)
+
+- name: Разрешить только два штатных официальных узла репозитория OMV
+  ansible.builtin.set_fact:
+    nas_mirror_original_text: "{{ nas_mirror_original_source.content | b64decode }}"
+    nas_mirror_original_mirrors: >-
+      {{ (nas_mirror_original_list.content | b64decode)
+         if (nas_mirror_existing_stat.stat.exists | default(false))
+         else none }}
+    nas_mirror_allowed_sources:
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] https://packages.openmediavault.org/public synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] https://packages.openmediavault.org/public/ synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] http://packages.openmediavault.org/public synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] http://packages.openmediavault.org/public/ synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] https://packages.openmediavault.io synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] https://packages.openmediavault.io/ synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] http://packages.openmediavault.io synchrony main"
+      - "deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] http://packages.openmediavault.io/ synchrony main"
+
+- name: Выделить действующие записи официального источника OMV
+  ansible.builtin.set_fact:
+    nas_mirror_active_sources: >-
+      {{ nas_mirror_original_text.splitlines()
+         | map('trim') | reject('match', '^(#|$)') | list }}
+
+- name: Проверить whitelist и число действующих записей до изменений
+  ansible.builtin.assert:
+    that:
+      - nas_mirror_active_sources | length >= 1
+      - nas_mirror_active_sources | length <= 2
+      - nas_mirror_active_sources | difference(nas_mirror_allowed_sources) | length == 0
+    fail_msg: Список APT OMV отличается от разрешённых официальных репозиториев
+
+- name: Не допустить символьные ссылки в каталогах APT и журнала
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/apt/mirrors
+    - /var/lib/infra-manager
+  register: nas_mirror_parent_paths
+
+- name: Подтвердить безопасные родительские каталоги перед записью
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - not (item.stat.exists | default(false)) or item.stat.isdir | default(false)
+      - not (item.stat.exists | default(false)) or item.stat.pw_name == 'root'
+    fail_msg: Родительский каталог APT является ссылкой или подменён
+  loop: "{{ nas_mirror_parent_paths.results }}"
+
+- name: Создать только необходимые каталоги для безопасной замены APT
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/apt/mirrors, mode: "0755"}
+    - {path: /var/lib/infra-manager, mode: "0700"}
+
+- name: Сохранить исходные APT-файлы перед первой записью
+  ansible.builtin.copy:
+    dest: /var/lib/infra-manager/omv-apt-mirror-recovery.json
+    content: "{{ {'source': nas_mirror_original_text, 'mirrors': nas_mirror_original_mirrors} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    follow: false
+    unsafe_writes: false
+  register: nas_mirror_saved
+  no_log: true
+
+- name: Запретить запись источников без нового защищённого журнала
+  ansible.builtin.assert:
+    that:
+      - nas_mirror_saved is changed
+    fail_msg: Журнал восстановления APT уже существовал; замена источников запрещена
+
+- name: Переключить только подтверждённый OMV-источник с откатом при ошибке
+  block:
+    - name: Записать проверенные официальные зеркала OMV
+      ansible.builtin.copy:
+        dest: /etc/apt/mirrors/openmediavault.txt
+        content: |
+          # Official OMV 8 APT mirror priorities
+          https://packages.openmediavault.org/public/ priority:1
+          https://packages.openmediavault.io/ priority:2
+          https://openmediavault.github.io/packages/ priority:3
+          https://downloads.sourceforge.net/project/openmediavault/packages/ priority:4
+        owner: root
+        group: root
+        mode: "0644"
+        follow: false
+
+    - name: Подключить зеркала с обязательным штатным Signed-By
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/openmediavault.list
+        content: |
+          deb [signed-by=/usr/share/keyrings/openmediavault-archive-keyring.gpg] mirror+file:/etc/apt/mirrors/openmediavault.txt synchrony main
+        owner: root
+        group: root
+        mode: "0644"
+        follow: false
+
+    - name: Повторить обновление индексов через официальные зеркала
+      ansible.builtin.command:
+        argv: [apt-get, -o, APT::Update::Error-Mode=any, update]
+      register: nas_apt_mirror_refresh
+      changed_when: false
+      failed_when: false
+
+    - name: Убедиться, что зеркала OMV вернули рабочий APT
+      ansible.builtin.assert:
+        that:
+          - nas_apt_mirror_refresh.rc == 0
+        fail_msg: Обновление APT не прошло через подтверждённые зеркала OMV
+
+  rescue:
+    - name: Вернуть точный прежний официальный APT-источник
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/openmediavault.list
+        content: "{{ nas_mirror_original_text }}"
+        owner: root
+        group: root
+        mode: "0644"
+        follow: false
+
+    - name: Восстановить существовавший список зеркал
+      ansible.builtin.copy:
+        dest: /etc/apt/mirrors/openmediavault.txt
+        content: "{{ nas_mirror_original_mirrors }}"
+        owner: root
+        group: root
+        mode: "0644"
+        follow: false
+      when: nas_mirror_existing_stat.stat.exists | default(false)
+
+    - name: Убрать новый список зеркал, если его раньше не было
+      ansible.builtin.file:
+        path: /etc/apt/mirrors/openmediavault.txt
+        state: absent
+      when: not (nas_mirror_existing_stat.stat.exists | default(false))
+
+    - name: Убрать журнал только после возврата исходных файлов APT
+      ansible.builtin.file:
+        path: /var/lib/infra-manager/omv-apt-mirror-recovery.json
+        state: absent
+
+    - name: Остановить deploy после безопасного отката APT
+      ansible.builtin.fail:
+        msg: APT не восстановился через официальные зеркала; прежняя конфигурация возвращена

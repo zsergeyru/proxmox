@@ -1,0 +1,142 @@
+---
+# Administrator setup via Ansible. Password is never stored in Git,
+# playbook argv on 910, task output, or a world-readable file.
+- name: Проверить существующий пароль и признак инициализации UrBackup
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - /etc/nas-apps/urbackup/admin-password
+    - /etc/nas-apps/urbackup/initialized
+  register: nas_admin_files
+  no_log: true
+
+- name: Запретить подмену пароля и признака инициализации
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - >-
+        not (item.stat.exists | default(false))
+        or (
+          item.stat.isreg | default(false)
+          and item.stat.pw_name == 'root'
+          and item.stat.mode == '0600'
+        )
+    fail_msg: Небезопасное состояние администратора UrBackup
+  loop: "{{ nas_admin_files.results }}"
+  no_log: true
+
+- name: Определить, был ли администратор создан ранее
+  ansible.builtin.set_fact:
+    nas_admin_password_exists: "{{ nas_admin_files.results[0].stat.exists | default(false) }}"
+    nas_admin_initialized: "{{ nas_admin_files.results[1].stat.exists | default(false) }}"
+  no_log: true
+
+- name: Запретить потерю сохранённого пароля
+  ansible.builtin.assert:
+    that:
+      - not (nas_admin_initialized | bool) or nas_admin_password_exists | bool
+    fail_msg: UrBackup отмечен как инициализированный, но исходный пароль отсутствует
+  no_log: true
+
+- name: Проверить отсутствие старой базы перед созданием нового пароля
+  ansible.builtin.find:
+    paths: /var/lib/nas-apps/urbackup/server
+    hidden: true
+    file_type: any
+    recurse: false
+  register: nas_admin_existing_db
+  when: not (nas_admin_password_exists | bool)
+
+- name: Не создавать чужой пароль для уже существующей базы UrBackup
+  ansible.builtin.assert:
+    that:
+      - nas_admin_existing_db.matched | int == 0
+    fail_msg: База UrBackup уже существует без сохранённого пароля — автоматический сброс запрещён
+  when: not (nas_admin_password_exists | bool)
+
+- name: Создать случайный пароль только при первом развертывании
+  ansible.builtin.command:
+    argv: [openssl, rand, -base64, "48"]
+  register: nas_admin_new_password
+  changed_when: false
+  no_log: true
+  when: not (nas_admin_password_exists | bool)
+
+- name: Сохранить пароль в защищённом файле один раз
+  ansible.builtin.copy:
+    dest: /etc/nas-apps/urbackup/admin-password
+    content: "{{ nas_admin_new_password.stdout | trim }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    follow: false
+    unsafe_writes: false
+  when: not (nas_admin_password_exists | bool)
+  no_log: true
+
+- name: Прочитать сохранённый пароль без вывода в Ansible
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/urbackup/admin-password
+  register: nas_admin_protected_secret
+  no_log: true
+
+- name: Проверить исходный пароль перед Docker-командой
+  ansible.builtin.assert:
+    that:
+      - nas_admin_protected_secret.content | b64decode | trim | length >= 32
+      - nas_admin_protected_secret.content | b64decode | trim | length <= 128
+    fail_msg: Некорректный защищённый пароль администратора
+  no_log: true
+
+- name: Настроить администратора только при первой инициализации
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - /etc/nas-apps/urbackup/compose.yml
+      - run
+      - --rm
+      - --no-deps
+      - -T
+      - urbackup
+      - reset-admin-pw
+      - -a
+      - "{{ nas_backup_policy.server.admin_user }}"
+      - -p
+      - "{{ nas_admin_protected_secret.content | b64decode | trim }}"
+  register: nas_admin_first_setup
+  no_log: true
+  changed_when: nas_admin_first_setup.rc == 0
+  when: not (nas_admin_initialized | bool)
+
+- name: Подтвердить создание администратора без перезаписи старого маркера
+  ansible.builtin.copy:
+    dest: /etc/nas-apps/urbackup/initialized
+    content: "administrator-created\n"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+    follow: false
+    unsafe_writes: false
+  when: not (nas_admin_initialized | bool)
+  no_log: true
+
+- name: Проверить закрытый признак успешной инициализации
+  ansible.builtin.stat:
+    path: /etc/nas-apps/urbackup/initialized
+    follow: false
+  register: nas_admin_final_marker
+  no_log: true
+
+- name: Отказать, если установка администратора не подтверждена
+  ansible.builtin.assert:
+    that:
+      - nas_admin_final_marker.stat.isreg | default(false)
+      - not (nas_admin_final_marker.stat.islnk | default(false))
+      - nas_admin_final_marker.stat.mode == '0600'
+    fail_msg: Инициализация UrBackup не завершена
+  no_log: true

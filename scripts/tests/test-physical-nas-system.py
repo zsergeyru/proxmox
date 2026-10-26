@@ -117,9 +117,9 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert "nas_required_packages.stdout_lines" in after_extras["when"]
     assert "!= 6" in after_extras["when"]
     fail = next(item for item in tasks if item.get("name") ==
-        "Прервать настройку из-за ошибки обновления APT")
+        "Остановить deploy, если APT не восстановился")
     assert "nas_apt_refresh.rc" in str(fail["when"])
-    assert "не начиналось" in fail["ansible.builtin.fail"]["msg"]
+    assert "затем повторите infra-manager deploy nas" in fail["ansible.builtin.fail"]["msg"]
     dns = next(item for item in tasks if item.get("name") ==
         "Проверить DNS основного репозитория OMV после ошибки APT")
     assert dns["ansible.builtin.command"]["argv"] == [
@@ -136,23 +136,32 @@ def test_nas_apt_diagnostic_guard() -> None:
     assert "nas_apt_refresh.rc" in str(dns["when"])
     assert "nas_apt_refresh.rc" in str(https["when"])
     recovery = next(item for item in tasks if item.get("name") ==
-        "Восстановить официальный список зеркал OMV при подтверждённом HTTP 503")
-    assert recovery["ansible.builtin.script"]["cmd"].endswith(
-        "nas-omv-mirror-recover.py apply"
-    )
+        "Восстановить зеркала OMV только декларативным Ansible при HTTP 503")
+    assert recovery["ansible.builtin.include_tasks"] == "omv-mirror-recovery.yml"
     assert "503" in str(recovery["when"])
     assert "packages.openmediavault.org" in str(recovery["when"])
-    retry = next(item for item in tasks if item.get("name") ==
-        "Повторить обновление APT через проверенные зеркала OMV")
-    assert retry["register"] == "nas_apt_mirror_refresh"
-    assert retry["failed_when"] is False
-    rollback = next(item for item in tasks if item.get("name") ==
-        "Откатить изменения OMV при повторной ошибке обновления APT")
-    assert rollback["ansible.builtin.script"]["cmd"].endswith(
-        "nas-omv-mirror-recover.py rollback"
-    )
-    assert "nas_apt_mirror_refresh.rc" in str(rollback["when"])
     assert "nas_apt_mirror_refresh" in str(fail["when"])
+
+    mirror = yaml.safe_load((
+        ROOT / "automation/ansible/roles/nas/tasks/omv-mirror-recovery.yml"
+    ).read_text(encoding="utf-8"))
+    assert mirror and all("ansible.builtin.script" not in task for task in mirror)
+    assert "nas_mirror_allowed_sources" in str(mirror)
+    assert "nas_mirror_active_sources | difference(nas_mirror_allowed_sources)" in str(mirror)
+    assert "nas_mirror_journal_stat" in str(mirror)
+    journal = [item for item in mirror
+               if item.get("name") == "Сохранить исходные APT-файлы перед первой записью"]
+    assert len(journal) == 1
+    assert journal[0]["ansible.builtin.copy"]["force"] is False
+    recovery_block = next(item for item in mirror
+        if item.get("name") == "Переключить только подтверждённый OMV-источник с откатом при ошибке")
+    assert "block" in recovery_block and "rescue" in recovery_block
+    assert any("nas_apt_mirror_refresh" in str(step) for step in recovery_block["block"])
+    assert any("Вернуть точный прежний официальный APT-источник" in step["name"]
+               for step in recovery_block["rescue"])
+    assert any("Убрать журнал только после возврата исходных файлов APT" in step["name"]
+               for step in recovery_block["rescue"])
+    assert "nas-storage-prepare.py" not in str(tasks)
 
 
 def test_zfs_dkms_stays_on_running_kernel_and_precedes_disk_changes() -> None:
@@ -176,7 +185,9 @@ def test_zfs_dkms_stays_on_running_kernel_and_precedes_disk_changes() -> None:
     sys_module, sys_index = step("Проверить загрузку ZFS в ядро")
     loaded, loaded_index = step("Подтвердить загрузку ZFS в работающее ядро")
     docker, docker_index = step("Установить Docker через источник пакетов, управляемый OMV-Extras")
-    storage, storage_index = step("Установить одноразовый исполнитель подготовки пустых HDD")
+    storage, storage_index = step("Удалить устаревший Python-исполнитель разметки с NAS")
+    assert storage["ansible.builtin.file"]["state"] == "absent"
+    assert storage["ansible.builtin.file"]["path"] == "/usr/local/sbin/nas-storage-prepare"
     assert first < header_index < apt_index < dkms_index < ready_index
     assert ready_index < confirm_index < load_index < sys_index < loaded_index
     assert loaded_index < docker_index < storage_index

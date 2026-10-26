@@ -168,52 +168,24 @@
     - nas_apt_refresh is not skipped
     - nas_apt_refresh.rc | default(0) != 0
 
-- name: Восстановить официальный список зеркал OMV при подтверждённом HTTP 503
-  ansible.builtin.script:
-    cmd: "{{ role_path }}/files/nas-omv-mirror-recover.py apply"
-    executable: /usr/bin/python3
-  register: nas_apt_mirror_recovery
-  changed_when: nas_apt_mirror_recovery.rc == 0
+- name: Восстановить зеркала OMV только декларативным Ansible при HTTP 503
+  ansible.builtin.include_tasks: omv-mirror-recovery.yml
   when:
     - nas_apt_refresh is not skipped
     - nas_apt_refresh.rc | default(0) != 0
     - (nas_apt_omv_https.stdout | default('') | trim) == '503'
     - "'packages.openmediavault.org' in (nas_apt_refresh.stdout | default('')) or 'packages.openmediavault.org' in (nas_apt_refresh.stderr | default(''))"
 
-- name: Повторить обновление APT через проверенные зеркала OMV
-  ansible.builtin.command:
-    argv:
-      - apt-get
-      - -o
-      - APT::Update::Error-Mode=any
-      - update
-  register: nas_apt_mirror_refresh
-  changed_when: nas_apt_mirror_refresh.rc == 0
-  failed_when: false
-  when:
-    - nas_apt_mirror_recovery is not skipped
-    - nas_apt_mirror_recovery.rc | default(1) == 0
-
-- name: Откатить изменения OMV при повторной ошибке обновления APT
-  ansible.builtin.script:
-    cmd: "{{ role_path }}/files/nas-omv-mirror-recover.py rollback"
-    executable: /usr/bin/python3
-  when:
-    - nas_apt_mirror_refresh is not skipped
-    - nas_apt_mirror_refresh.rc | default(0) != 0
-
-- name: Прервать настройку из-за ошибки обновления APT
+- name: Остановить deploy, если APT не восстановился
   ansible.builtin.fail:
     msg: >-
-      Не удалось обновить индексы пакетов после установки OMV-Extras
-      (код APT {{ nas_apt_refresh.rc }}).
-      Проверьте вывод диагностики выше; изменение разметки дисков
-      не начиналось. После исправления репозиториев повторите
-      infra-manager deploy nas.
+      Не удалось обновить APT OMV. Проверьте состояние источников
+      и официальный пакетный репозиторий, затем повторите infra-manager deploy nas.
+      Жёстко закреплённый системный SSD и HDD не изменялись этой ролью.
   when:
     - nas_apt_refresh is not skipped
     - nas_apt_refresh.rc | default(0) != 0
-    - nas_apt_mirror_refresh is skipped or nas_apt_mirror_refresh.rc | default(0) != 0
+    - nas_apt_mirror_refresh is not defined or nas_apt_mirror_refresh.rc | default(1) != 0
 
 - name: Установить расширения OMV для ZFS и Docker
   ansible.builtin.apt:
@@ -350,10 +322,7 @@
     argv: [docker, --version]
   changed_when: false
 
-- name: Установить одноразовый исполнитель подготовки пустых HDD
-  ansible.builtin.copy:
-    src: nas-storage-prepare.py
-    dest: /usr/local/sbin/nas-storage-prepare
-    owner: root
-    group: root
-    mode: "0700"
+- name: Удалить устаревший Python-исполнитель разметки с NAS
+  ansible.builtin.file:
+    path: /usr/local/sbin/nas-storage-prepare
+    state: absent

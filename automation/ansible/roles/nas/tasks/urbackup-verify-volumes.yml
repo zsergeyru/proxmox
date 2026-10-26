@@ -1,0 +1,95 @@
+---
+# Repeat independent ZFS/mount verification immediately before UrBackup changes.
+# All expectations come from the verified storage.yaml-backed deploy variables.
+- name: Запретить неоднозначное назначение данных и резервного пула
+  ansible.builtin.assert:
+    that:
+      - nas_data_pool is match('^nas-[a-z0-9-]+$')
+      - nas_backup_pool is match('^nas-[a-z0-9-]+$')
+      - nas_data_pool != nas_backup_pool
+      - nas_data_guid is match('^[0-9]{1,20}$')
+      - nas_backup_guid is match('^[0-9]{1,20}$')
+      - nas_data_guid != nas_backup_guid
+      - nas_data_mountpoint == '/' ~ nas_data_pool
+      - nas_backup_mountpoint == '/' ~ nas_backup_pool
+    fail_msg: Нет двух независимых подтверждённых ZFS томов UrBackup
+
+- name: Прочитать GUID двух ZFS-пулов до операций с каталогами
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ item.pool }}"]
+  loop:
+    - {pool: "{{ nas_data_pool }}", guid: "{{ nas_data_guid }}"}
+    - {pool: "{{ nas_backup_pool }}", guid: "{{ nas_backup_guid }}"}
+  register: nas_urbackup_verified_guids
+  changed_when: false
+  loop_control:
+    label: "{{ item.pool }}"
+
+- name: Подтвердить GUID перед записью
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == item.item.guid
+    fail_msg: ZFS GUID не совпал с закреплённым состоянием 910
+  loop: "{{ nas_urbackup_verified_guids.results }}"
+  loop_control:
+    label: "{{ item.item.pool }}"
+
+- name: Прочитать состояние ONLINE обоих пулов
+  ansible.builtin.command:
+    argv: [zpool, list, -H, -o, health, "{{ item }}"]
+  loop:
+    - "{{ nas_data_pool }}"
+    - "{{ nas_backup_pool }}"
+  register: nas_urbackup_pool_health
+  changed_when: false
+
+- name: Запретить работу при неисправном ZFS
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == 'ONLINE'
+    fail_msg: ZFS-пул не ONLINE
+  loop: "{{ nas_urbackup_pool_health.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Прочитать реальные смонтированные источники
+  ansible.builtin.command:
+    argv: [findmnt, -n, -M, "{{ item.path }}", -o, SOURCE,FSTYPE]
+  loop:
+    - {path: "{{ nas_data_mountpoint }}", pool: "{{ nas_data_pool }}"}
+    - {path: "{{ nas_backup_mountpoint }}", pool: "{{ nas_backup_pool }}"}
+  register: nas_urbackup_exact_mounts
+  changed_when: false
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Доказать, что каталоги относятся к нужным ZFS и не к SSD
+  ansible.builtin.assert:
+    that:
+      - item.stdout.split() | length == 2
+      - item.stdout.split()[0].split('/')[0] == item.item.pool
+      - item.stdout.split()[1] == 'zfs'
+    fail_msg: Назначенный каталог не является подтверждённым ZFS-монтированием
+  loop: "{{ nas_urbackup_exact_mounts.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+
+- name: Проверить отсутствие символьных ссылок на верхнем уровне UrBackup
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+  loop:
+    - "{{ nas_backup_mountpoint }}/urbackup"
+    - "{{ nas_backup_mountpoint }}/urbackup/backups"
+    - "{{ nas_backup_mountpoint }}/urbackup/recovery"
+  register: nas_urbackup_directories_before_write
+
+- name: Запретить подмену каталогов UrBackup или чужой тип файла
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - not (item.stat.exists | default(false)) or item.stat.isdir | default(false)
+    fail_msg: Недопустимый объект внутри резервного ZFS, запись запрещена
+  loop: "{{ nas_urbackup_directories_before_write.results }}"
+  loop_control:
+    label: "{{ item.item }}"

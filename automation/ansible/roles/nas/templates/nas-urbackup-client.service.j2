@@ -8,7 +8,7 @@ RequiresMountsFor={{ nas_data_mountpoint }} {{ nas_backup_mountpoint }}
 [Service]
 Type=simple
 ExecStartPre=/usr/local/sbin/nas-urbackup-safe preflight
-ExecStartPre=/usr/local/sbin/nas-urbackup-client-mount check
+ExecStartPre=/usr/local/sbin/nas-urbackup-client-mount prepare
 ExecStart=/usr/bin/docker compose -f /etc/nas-apps/urbackup/client-compose.yml up --no-color
 ExecStop=/usr/bin/docker compose -f /etc/nas-apps/urbackup/client-compose.yml down
 Restart=on-failure
