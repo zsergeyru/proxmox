@@ -48,7 +48,14 @@
            )
            or (
              declared_disk.role not in ['system', 'shared']
-             and chosen.fstype == 'zfs_member'
+             and (
+               chosen.fstype == 'zfs_member'
+               or (
+                 chosen.children | default([], true)
+                 | selectattr('fstype', 'equalto', 'zfs_member')
+                 | list | length > 0
+               )
+             )
            )
          ) }}
     physical_plan_assignments: >-
