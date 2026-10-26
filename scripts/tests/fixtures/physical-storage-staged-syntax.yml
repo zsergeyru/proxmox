@@ -11,6 +11,11 @@
         name: physical_storage
         tasks_from: prepare-preflight.yml
 
+    - name: Проверить незаписывающую подготовку к явно разрешённому пересозданию
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: prepare-recreate-preflight.yml
+
     - name: Проверить одноразовый журнал HDD
       ansible.builtin.import_role:
         name: physical_storage
