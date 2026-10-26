@@ -1,15 +1,12 @@
 ---
-# Read-only gate for user-approved ONE-TIME recreation of data disks.
-# A plan does not grant permission to wipe: both exact fingerprint and explicit
-# PVE confirmation are required later. Deliberately contains NO write tasks.
-- name: Require exactly approved one-time data-disk policy
+# Only admission checks for future single-use recreation of data disks.
+# This role never unmounts, erases, partitions, formats, or imports pools.
+- name: Проверить разрешённые роли и подтверждённый план HDD
   ansible.builtin.assert:
     that:
       - physical_storage.initialization is mapping
       - physical_storage.initialization.require_exact_device_confirmation | bool
       - physical_storage.initialization.recreate_once | length > 0
-      - physical_storage.initialization.recreate_once | difference(physical_storage.devices | rejectattr('role', 'in', ['system', 'unused']) | map(attribute='id') | list) | length == 0
-      - physical_storage.policies.unverified_devices == 'reject_writes'
       - physical_disk_intent is mapping
       - physical_disk_intent.host == physical_host_name
       - physical_disk_intent.schema_version == 1
@@ -19,37 +16,37 @@
       - physical_disk_intent['items'] | map(attribute='role') | list | sort == physical_storage.initialization.recreate_once | sort
       - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == physical_disk_intent['items'] | length
       - physical_disk_recreate_authorized | default(false) | bool
-    fail_msg: Only an explicitly approved plan for the three data disks is allowed
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+    fail_msg: Нет разрешённого точного плана очистки HDD
 
-- name: Refuse any system or undeclared disk in the approved plan
+- name: Запретить очистку системы, неизвестных ролей и дисков
   ansible.builtin.assert:
     that:
-      - expected | length == 1
-      - expected[0].id != 'system'
-      - expected[0].role not in ['system', 'unused']
-      - item.serial is match('^[A-Za-z0-9._:-]{1,128}$')
-      - expected[0].serial is none or expected[0].serial == item.serial
       - item.keys() | list | sort == ['action', 'role', 'serial']
       - item.action == 'recreate'
-    fail_msg: A system, unverified or unexpectedly assigned disk was requested
+      - item.serial is match('^[A-Za-z0-9._:-]{1,128}$')
+      - expected | length == 1
+      - expected[0].role not in ['system', 'unused']
+      - expected[0].serial is none or expected[0].serial == item.serial
+    fail_msg: Неизвестный или системный диск не может быть очищен
   vars:
     expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
   loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
-- name: Inspect physical disks with the common read-only Ansible role
+- name: Сверить общую декларацию и фактические диски без записи
   ansible.builtin.include_role:
     name: physical_storage
     tasks_from: inspect.yml
 
-- name: Read disk tree and root filesystem without modifying storage
+- name: Получить дерево накопителей со всеми дочерними разделами
   ansible.builtin.command:
-    argv: [lsblk, --json, --tree, --bytes, --output, NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS]
+    argv: [lsblk, --json, --tree, --bytes, --output, 'NAME,PATH,MODEL,SERIAL,SIZE,TYPE,FSTYPE,UUID,PTTYPE,MOUNTPOINTS']
   register: physical_recreate_tree
   changed_when: false
 
-- name: Identify the unique actual system disk using the root filesystem
+- name: Найти системную ФС и потребовать ровно один корневой SSD
   ansible.builtin.command:
     argv:
       - jq
@@ -59,13 +56,13 @@
     stdin_add_newline: false
   changed_when: false
 
-- name: Store observed physical disks without guessing /dev/sdX ordering
+- name: Зафиксировать фактические устройства только в памяти Ansible
   ansible.builtin.set_fact:
     physical_recreate_actual: >-
       {{ (physical_recreate_tree.stdout | from_json).blockdevices
          | selectattr('type', 'equalto', 'disk') | list }}
 
-- name: Verify exact model, capacity, serial, and exclusion of the root disk
+- name: Подтвердить серийный номер, модель и размер каждого HDD
   ansible.builtin.assert:
     that:
       - actual | length == 1
@@ -74,19 +71,15 @@
       - expected[0].model | lower in actual[0].model | lower
       - actual[0].size | int >= (expected[0].capacity_gb | int) * 950000000
       - actual[0].size | int <= (expected[0].capacity_gb | int) * 1050000000
-      - root_mounts | length == 0
-    fail_msg: The approved disk identity changed or the OS disk was selected
+    fail_msg: Идентичность HDD изменена относительно подтверждённого плана
   vars:
-    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
     actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
-    root_mounts: >-
-      {{ actual[0].mountpoints | default([], true) | select('equalto', '/') | list
-         if actual | length == 1 else ['/'] }}
+    expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
   loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
-- name: Prove that NONE of the selected disks contains the OS root, including LVM descendants
+- name: Доказать, что выбранный диск не содержит корневой раздел даже внутри LVM
   ansible.builtin.command:
     argv:
       - jq
@@ -102,7 +95,7 @@
   loop_control:
     label: "{{ item.role }}"
 
-- name: Discover stable by-id paths for the approved data drives
+- name: Найти устойчивые ссылки by-id только на целые HDD
   ansible.builtin.find:
     paths: /dev/disk/by-id
     file_type: link
@@ -110,98 +103,37 @@
     patterns: ['ata-*', 'scsi-*']
   register: physical_recreate_links
 
-- name: Refuse targets without stable serial-specific by-id names
+- name: Разрешить только ссылки, содержащие серийный номер HDD
   ansible.builtin.assert:
     that:
-      - links | length > 0
-    fail_msg: A data disk does not have an unambiguous stable by-id alias
+      - aliases | length > 0
+    fail_msg: Не найдена постоянная ссылка для подтверждённого HDD
   vars:
-    links: >-
-      {{ physical_recreate_links.files
-         | selectattr('path', 'search', item.serial)
-         | rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.stat:
-    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
-    follow: false
-  register: physical_recreate_previous_state
-  delegate_to: localhost
-  become: false
-
-- name: Never reinitialize a previously confirmed disk
-  ansible.builtin.assert:
-    that:
-      - not (physical_recreate_previous_state.stat.exists | default(false))
-      - not (physical_recreate_previous_state.stat.islnk | default(false))
-    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
-
-- name: Refuse an interrupted preparation journal
-  ansible.builtin.stat:
-    path: /etc/nas-apps/storage-preparation.json
-    follow: false
-  register: physical_recreate_previous_journal
-
-- name: Refuse repeat destruction after a previous partial run
-  ansible.builtin.assert:
-    that:
-      - not (physical_recreate_previous_journal.stat.exists | default(false))
-      - not (physical_recreate_previous_journal.stat.islnk | default(false))
-    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
-
-- name: Explain eligibility, without clearing or unmounting any disks
-  ansible.builtin.debug:
-    msg: Exact data disks and policy checked; no filesystem was changed
-) | list }}
+    aliases: >-
+      {{ physical_recreate_links.files | selectattr('path', 'search', item.serial)
+         | rejectattr('path', 'search', '-part[0-9]+$') | list }}
   loop: "{{ physical_disk_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
-- name: Resolve aliases without trusting symlink target names
+- name: Разрешить настоящие устройства за ссылками by-id
   ansible.builtin.command:
     argv: [readlink, --canonicalize-existing, "{{ item.path }}"]
-  changed_when: false
   register: physical_recreate_resolved
+  changed_when: false
   loop: >-
-    {{ physical_recreate_links.files |
-       rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.stat:
-    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
-    follow: false
-  register: physical_recreate_previous_state
-  delegate_to: localhost
-  become: false
-
-- name: Never reinitialize a previously confirmed disk
-  ansible.builtin.assert:
-    that:
-      - not (physical_recreate_previous_state.stat.exists | default(false))
-      - not (physical_recreate_previous_state.stat.islnk | default(false))
-    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
-
-- name: Refuse an interrupted preparation journal
-  ansible.builtin.stat:
-    path: /etc/nas-apps/storage-preparation.json
-    follow: false
-  register: physical_recreate_previous_journal
-
-- name: Refuse repeat destruction after a previous partial run
-  ansible.builtin.assert:
-    that:
-      - not (physical_recreate_previous_journal.stat.exists | default(false))
-      - not (physical_recreate_previous_journal.stat.islnk | default(false))
-    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
-
-- name: Explain eligibility, without clearing or unmounting any disks
-  ansible.builtin.debug:
-    msg: Exact data disks and policy checked; no filesystem was changed
-) | list }}
+    {{ physical_recreate_links.files
+       | rejectattr('path', 'search', '-part[0-9]+$') | list }}
   loop_control:
     label: "{{ item.path }}"
 
-- name: Verify by-id aliases resolve to the same approved serial
+- name: Сверить цели ссылок с ранее проверенным настоящим устройством
   ansible.builtin.assert:
     that:
       - actual | length == 1
       - aliases | length > 0
       - aliases | rejectattr('stdout', 'equalto', actual[0].path) | list | length == 0
-    fail_msg: A by-id alias points at a different physical disk
+    fail_msg: Ссылка by-id указывает на чужой накопитель
   vars:
     actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
     aliases: >-
@@ -211,7 +143,7 @@
   loop_control:
     label: "{{ item.role }}"
 
-- name: Store only verified stable data disk paths in ephemeral Ansible facts
+- name: Сохранить проверенные by-id только для текущего запуска
   ansible.builtin.set_fact:
     physical_recreate_by_id: >-
       {{ (physical_recreate_by_id | default({}))
@@ -224,7 +156,7 @@
   loop_control:
     label: "{{ item.role }}"
 
-- name: Refuse a completed previous disk assignment on the controller
+- name: Проверить отсутствие подтверждённого состояния на контроллере
   ansible.builtin.stat:
     path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
     follow: false
@@ -232,26 +164,26 @@
   delegate_to: localhost
   become: false
 
-- name: Never reinitialize a previously confirmed disk
+- name: Отказать в повторном пересоздании уже закреплённых томов
   ansible.builtin.assert:
     that:
       - not (physical_recreate_previous_state.stat.exists | default(false))
       - not (physical_recreate_previous_state.stat.islnk | default(false))
-    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
+    fail_msg: UUID/GUID уже подтверждены; повторное форматирование запрещено
 
-- name: Refuse an interrupted preparation journal
+- name: Проверить отсутствие журнала предыдущей подготовки
   ansible.builtin.stat:
     path: /etc/nas-apps/storage-preparation.json
     follow: false
   register: physical_recreate_previous_journal
 
-- name: Refuse repeat destruction after a previous partial run
+- name: Отказать в повторной очистке после незавершённой попытки
   ansible.builtin.assert:
     that:
       - not (physical_recreate_previous_journal.stat.exists | default(false))
       - not (physical_recreate_previous_journal.stat.islnk | default(false))
-    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
+    fail_msg: Обнаружен прежний журнал; требуется восстановление, не повторная очистка
 
-- name: Explain eligibility, without clearing or unmounting any disks
+- name: Подтвердить только готовность к подготовке, не выполнять запись на HDD
   ansible.builtin.debug:
-    msg: Exact data disks and policy checked; no filesystem was changed
+    msg: Сверены роли, физические диски и безопасные пути; очистка не выполнялась
