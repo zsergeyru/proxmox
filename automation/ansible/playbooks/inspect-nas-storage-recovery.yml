@@ -9,6 +9,7 @@
       {{ lookup('ansible.builtin.file',
          playbook_dir ~ '/../../../infrastructure/hosts/nas/storage.yaml')
          | from_yaml }}
+    physical_recovery_intent: "{{ physical_disk_intent }}"
   tasks:
     - name: Сверить старый журнал и фактические ext4/ZFS
       ansible.builtin.include_role:
