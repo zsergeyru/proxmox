@@ -98,7 +98,7 @@
 - name: Не включать ACL при отключённых ZFS xattr
   ansible.builtin.assert:
     that:
-      - nas_smb_zfs_xattr.stdout | trim in ['dir', 'sa']
+      - nas_smb_zfs_xattr.stdout | trim in ['dir', 'sa', 'on']
     fail_msg: >-
       ZFS xattr отключён или имеет неподдерживаемый тип;
       назначение POSIX ACL остановлено без изменения пула
