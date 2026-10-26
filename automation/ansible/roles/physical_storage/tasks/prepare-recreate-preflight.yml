@@ -85,6 +85,144 @@
   loop_control:
     label: "{{ item.role }}"
 
+- name: Prove that NONE of the selected disks contains the OS root, including LVM descendants
+  ansible.builtin.command:
+    argv:
+      - jq
+      - -e
+      - --arg
+      - serial
+      - "{{ item.serial }}"
+      - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
+    stdin: "{{ physical_recreate_tree.stdout }}"
+    stdin_add_newline: false
+  changed_when: false
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Discover stable by-id paths for the approved data drives
+  ansible.builtin.find:
+    paths: /dev/disk/by-id
+    file_type: link
+    recurse: false
+    patterns: ['ata-*', 'scsi-*']
+  register: physical_recreate_links
+
+- name: Refuse targets without stable serial-specific by-id names
+  ansible.builtin.assert:
+    that:
+      - links | length > 0
+    fail_msg: A data disk does not have an unambiguous stable by-id alias
+  vars:
+    links: >-
+      {{ physical_recreate_links.files
+         | selectattr('path', 'search', item.serial)
+         | rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_recreate_previous_state
+  delegate_to: localhost
+  become: false
+
+- name: Never reinitialize a previously confirmed disk
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_state.stat.exists | default(false))
+      - not (physical_recreate_previous_state.stat.islnk | default(false))
+    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
+
+- name: Refuse an interrupted preparation journal
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_recreate_previous_journal
+
+- name: Refuse repeat destruction after a previous partial run
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_journal.stat.exists | default(false))
+      - not (physical_recreate_previous_journal.stat.islnk | default(false))
+    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
+
+- name: Explain eligibility, without clearing or unmounting any disks
+  ansible.builtin.debug:
+    msg: Exact data disks and policy checked; no filesystem was changed
+) | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Resolve aliases without trusting symlink target names
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, "{{ item.path }}"]
+  changed_when: false
+  register: physical_recreate_resolved
+  loop: >-
+    {{ physical_recreate_links.files |
+       rejectattr('path', 'search', '-part[0-9]+  ansible.builtin.stat:
+    path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
+    follow: false
+  register: physical_recreate_previous_state
+  delegate_to: localhost
+  become: false
+
+- name: Never reinitialize a previously confirmed disk
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_state.stat.exists | default(false))
+      - not (physical_recreate_previous_state.stat.islnk | default(false))
+    fail_msg: Verified UUID/GUID already exist; repeat formatting prohibited
+
+- name: Refuse an interrupted preparation journal
+  ansible.builtin.stat:
+    path: /etc/nas-apps/storage-preparation.json
+    follow: false
+  register: physical_recreate_previous_journal
+
+- name: Refuse repeat destruction after a previous partial run
+  ansible.builtin.assert:
+    that:
+      - not (physical_recreate_previous_journal.stat.exists | default(false))
+      - not (physical_recreate_previous_journal.stat.islnk | default(false))
+    fail_msg: An earlier one-shot journal exists; inspect/recover instead of wiping
+
+- name: Explain eligibility, without clearing or unmounting any disks
+  ansible.builtin.debug:
+    msg: Exact data disks and policy checked; no filesystem was changed
+) | list }}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Verify by-id aliases resolve to the same approved serial
+  ansible.builtin.assert:
+    that:
+      - actual | length == 1
+      - aliases | length > 0
+      - aliases | rejectattr('stdout', 'equalto', actual[0].path) | list | length == 0
+    fail_msg: A by-id alias points at a different physical disk
+  vars:
+    actual: "{{ physical_recreate_actual | selectattr('serial', 'equalto', item.serial) | list }}"
+    aliases: >-
+      {{ physical_recreate_resolved.results
+         | selectattr('item.path', 'search', item.serial) | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Store only verified stable data disk paths in ephemeral Ansible facts
+  ansible.builtin.set_fact:
+    physical_recreate_by_id: >-
+      {{ (physical_recreate_by_id | default({}))
+         | combine({item.role: (aliases | first).item.path}) }}
+  vars:
+    aliases: >-
+      {{ physical_recreate_resolved.results
+         | selectattr('item.path', 'search', item.serial) | list }}
+  loop: "{{ physical_disk_intent['items'] }}"
+  loop_control:
+    label: "{{ item.role }}"
+
 - name: Refuse a completed previous disk assignment on the controller
   ansible.builtin.stat:
     path: "/var/lib/infra-manager/physical-hosts/{{ physical_host_name }}-storage.json"
