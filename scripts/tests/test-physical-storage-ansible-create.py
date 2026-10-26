@@ -137,7 +137,10 @@ def test_recovery_is_strictly_read_only() -> None:
         assert "prepare-write.yml" not in active, p
         assert "prepare-journal.yml" not in active, p
         if "prepare-recover-inspect.yml" in active:
-            assert p.name == "inspect-physical-storage-recovery.yml", p
+            assert p.name in {
+                "inspect-physical-storage-recovery.yml",
+                "inspect-nas-storage-recovery.yml",
+            }, p
     entry = (ROOT / "automation/ansible/playbooks/inspect-physical-storage-recovery.yml")
     assert "tasks_from: prepare-recover-inspect.yml" in entry.read_text(encoding="utf-8")
 
