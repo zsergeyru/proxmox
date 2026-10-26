@@ -7,9 +7,9 @@
     that:
       - nas_omv_registration_authorized | default(false) | bool
       - physical_host_name == 'nas'
-      - physical_disk_intent.mode == 'recover'
-      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
-      - physical_recovery_journal['items'] == physical_disk_intent['items']
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
       - nas_omv_registered is mapping
       - nas_omv_registered.keys() | list | sort == ['backup', 'data', 'shared']
       - nas_omv_registered.values() | list | unique | length == 3
