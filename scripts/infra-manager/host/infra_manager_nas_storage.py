@@ -62,7 +62,13 @@ def confirm_nas_storage(name: str, forward, error_type: type[Exception]) -> int:
         payload = json.dumps({"fingerprint": recovery_fingerprint}) + "\n"
         return forward(["deploy", name, "--_physical_stage", "prepare"], input_text=payload)
     if not plan.get("requires_creation"):
-        return 0
+        # Existing ext4/ZFS still needs independent Ansible verification
+        # and one-time controller-state registration before service deploy.
+        payload = json.dumps({"fingerprint": fingerprint}) + "\n"
+        return forward(
+            ["deploy", name, "--_physical_stage", "prepare"],
+            input_text=payload,
+        )
     if actions not in (
         ["preserve", "recreate", "recreate", "recreate"],
         ["preserve", "create-ext4", "create-zfs", "create-zfs"],
