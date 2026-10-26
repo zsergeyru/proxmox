@@ -1,0 +1,79 @@
+---
+# Safe EXECUTABLE Ansible fixture; only synthetic facts on localhost.
+# It proves no operating-system disk can be assigned a data role and tests
+# preservation of already-existing ext4 + OpenZFS GPT members.
+- name: Проверить назначение HDD по декларациям на синтетических дисках
+  hosts: localhost
+  gather_facts: false
+  vars:
+    physical_plan_root: {stdout: SYSTEM-TEST}
+    physical_plan_previous: {stat: {exists: false}}
+    physical_storage:
+      initialization:
+        recreate_once: [shared, data, backup]
+    declared_devices:
+      - {role: system, id: system, model: SPCC, serial: null, capacity_gb: 120}
+      - {role: shared, id: shared, model: ST1000DM003, serial: null, capacity_gb: 1000}
+      - {role: data, id: data, model: ST4000VX016, serial: null, capacity_gb: 4000}
+      - {role: backup, id: backup, model: ST4000VX016, serial: null, capacity_gb: 4000}
+  tasks:
+    - name: Подготовить четыре поддельных диска и результаты сканирования
+      ansible.builtin.set_fact:
+        physical_plan_available:
+          - {path: /dev/sda, serial: SYSTEM-TEST, model: SPCC, size: 120000000000, type: disk}
+          - path: /dev/sdb
+            serial: SHARED-TEST
+            model: ST1000DM003
+            size: 1000000000000
+            type: disk
+            pttype: gpt
+            children:
+              - {type: part, fstype: ext4, uuid: 11111111-2222-3333-4444-555555555555}
+          - path: /dev/sdc
+            serial: ZFS-A
+            model: ST4000VX016
+            size: 4000000000000
+            type: disk
+            pttype: gpt
+            children:
+              - {type: part, fstype: zfs_member}
+          - path: /dev/sdd
+            serial: ZFS-B
+            model: ST4000VX016
+            size: 4000000000000
+            type: disk
+            pttype: gpt
+            children:
+              - {type: part, fstype: zfs_member}
+        physical_plan_assignments: []
+        physical_plan_fingerprint_items: []
+        physical_plan_layout_ready: true
+
+    - name: Назначить каждую роль на единственный физический диск
+      ansible.builtin.include_role:
+        name: physical_storage
+        tasks_from: plan-assign.yml
+      loop: "{{ declared_devices }}"
+      loop_control:
+        loop_var: declared_disk
+
+    - name: Проверить, что SSD никогда не оказался данными
+      ansible.builtin.assert:
+        that:
+          - physical_plan_assignments | length == 4
+          - physical_plan_assignments | map(attribute='serial') | unique | list | length == 4
+          - (physical_plan_assignments | selectattr('role', 'equalto', 'system') | first).serial == 'SYSTEM-TEST'
+          - (physical_plan_assignments | selectattr('role', 'equalto', 'shared') | first).serial == 'SHARED-TEST'
+          - (physical_plan_assignments | selectattr('role', 'equalto', 'data') | first).serial == 'ZFS-A'
+          - (physical_plan_assignments | selectattr('role', 'equalto', 'backup') | first).serial == 'ZFS-B'
+          - physical_plan_available | length == 0
+          - physical_plan_layout_ready | bool
+
+    - name: Проверить, что без конечной регистрации нет повторного стирания
+      ansible.builtin.set_fact:
+        preserved: "{{ physical_plan_assignments | map('combine', {'action': 'preserve'}) | list }}"
+
+    - name: Сверить возможность безопасного принятия существующих файловых систем
+      ansible.builtin.assert:
+        that:
+          - preserved | map(attribute='action') | unique | list == ['preserve']
