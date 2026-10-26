@@ -491,6 +491,11 @@ def test_client_scoped_urbackup_archival_policy() -> None:
         task for task in tasks if "ansible.builtin.uri" in task
     ]
     assert len(urls) >= 7
+    client_poll = next(t for t in urls if t.get("register") == "nas_retention_clients_http")
+    assert client_poll["retries"] >= 10
+    assert client_poll["delay"] >= 3
+    assert "nas_backup_policy.local_client.name" in client_poll["until"]
+    assert client_poll["no_log"] is True
     assert all(
         task["ansible.builtin.uri"]["url"].startswith(
             "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a="
