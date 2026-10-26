@@ -1,0 +1,54 @@
+---
+# Staged, DESTRUCTIVE first-create coordinator. UNREACHABLE from ordinary
+# deploy, repair, inspect, status or any supported playbook. NEVER invoke
+# against real hardware before isolated virtual disk and recovery tests.
+# The operator must first approve the exact fingerprint outside this role.
+- name: Требовать подтверждённый план и отдельное разрешение первой записи
+  ansible.builtin.assert:
+    that:
+      - physical_host_name == 'nas'
+      - physical_storage.host == 'nas'
+      - physical_disk_intent is mapping
+      - physical_disk_intent.schema_version == 1
+      - physical_disk_intent.mode == 'first-create'
+      - physical_disk_intent.host == physical_host_name
+      - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_disk_intent['items'] | length == 3
+      - physical_disk_intent['items'] | map(attribute='role') | list | sort == ['backup', 'data', 'shared']
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
+      - nas_first_create_authorized | default(false) | bool
+      - nas_omv_registration_authorized | default(false) | bool
+      - physical_storage_state_commit_authorized | default(false) | bool
+      - physical_storage.policies.existing_data == 'preserve'
+      - physical_storage.policies.unverified_devices == 'reject_writes'
+      - physical_storage.policies.missing_mount == 'reject_writes'
+    fail_msg: Нет подтверждения первой подготовки всех трёх пустых HDD; запись запрещена
+
+- name: Повторить независимое обследование пустых дисков непосредственно перед записью
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: prepare-preflight.yml
+
+- name: Зафиксировать одноразовый защищённый журнал ДО первой записи на HDD
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: prepare-journal.yml
+
+- name: Создать ext4/ZFS только на подтверждённых by-id из того же Ansible-запуска
+  ansible.builtin.include_role:
+    name: physical_storage
+    tasks_from: prepare-write.yml
+
+# Recovery of the same in-progress one-shot journal NEVER runs the writer.
+# Instead verify what already exists, register OMV, then save identities.
+- name: Перейти от созданных дисков к независимой проверке старого журнала
+  ansible.builtin.set_fact:
+    physical_disk_intent: "{{ physical_disk_intent | combine({'mode': 'recover'}) }}"
+
+- name: Проверить и зарегистрировать созданные тома без новой разметки
+  ansible.builtin.include_tasks: prepare-recover-complete.yml
+
+- name: Завершить создание только после подтверждения состояния 910
+  ansible.builtin.debug:
+    msg: Первая подготовка завершена, UUID/GUID подтверждены; повторная запись запрещена
