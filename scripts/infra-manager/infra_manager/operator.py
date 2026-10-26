@@ -802,10 +802,6 @@ def build_parser() -> argparse.ArgumentParser:
         "guests",
         help="показать поддерживаемых гостей и их состояние",
     )
-    subparsers.add_parser(
-        "hosts",
-        help="показать физические серверы",
-    )
     state = subparsers.add_parser("bootstrap-state", help=argparse.SUPPRESS)
     state.add_argument("name")
     bootstrap = subparsers.add_parser("bootstrap", help=argparse.SUPPRESS)
@@ -873,8 +869,6 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "guests":
             return list_local_guests(PATHS.repo_root)
-        if args.command == "hosts":
-            return operator_physical_task("hosts", "all")
         if args.command in {"credential-plan", "credential-set"}:
             if not show_secrets:
                 raise InfraManagerError("Операторские секреты доступны только из доверенного PVE")
