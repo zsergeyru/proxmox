@@ -6,9 +6,9 @@
   ansible.builtin.assert:
     that:
       - physical_host_name == 'nas'
-      - physical_disk_intent.mode == 'recover'
-      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
-      - physical_recovery_journal['items'] == physical_disk_intent['items']
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
       - nas_omv_verified_volumes is mapping
       - nas_omv_verified_volumes.keys() | list | sort == ['backup', 'data', 'shared']
       - physical_recovery_disks is sequence
@@ -32,7 +32,7 @@
   ansible.builtin.assert:
     that:
       - physical_observed_system_serial.stdout | trim is match('^[A-Za-z0-9._:-]{1,128}$')
-      - physical_observed_system_serial.stdout | trim not in (physical_disk_intent['items'] | map(attribute='serial') | list)
+      - physical_observed_system_serial.stdout | trim not in (physical_recovery_intent['items'] | map(attribute='serial') | list)
     fail_msg: Системный SSD не имеет уникальной подтверждённой идентичности
 
 - name: Проверить все четыре роли по текущим серийным номерам и ёмкости
@@ -47,7 +47,7 @@
     fail_msg: HDD/SSD {{ item.role }} не соответствует подтверждённой декларации
   vars:
     assigned: >-
-      {{ physical_disk_intent['items']
+      {{ physical_recovery_intent['items']
          | selectattr('role', 'equalto', item.role) | list }}
     observed_serial: >-
       {{ (physical_observed_system_serial.stdout | trim)
@@ -65,7 +65,7 @@
          [item | combine({'serial': observed_serial})] }}
   vars:
     assigned: >-
-      {{ physical_disk_intent['items']
+      {{ physical_recovery_intent['items']
          | selectattr('role', 'equalto', item.role) | list }}
     observed_serial: >-
       {{ (physical_observed_system_serial.stdout | trim)
@@ -90,7 +90,7 @@
     physical_observed_storage:
       devices: "{{ physical_observed_devices }}"
       volumes: "{{ nas_omv_verified_volumes }}"
-      plan_fingerprint: "{{ physical_disk_intent.fingerprint }}"
+      plan_fingerprint: "{{ physical_recovery_intent.fingerprint }}"
 
 - name: Не изменять хранилище контроллера при подготовке наблюдаемых данных
   ansible.builtin.debug:
