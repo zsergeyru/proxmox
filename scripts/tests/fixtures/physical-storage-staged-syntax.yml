@@ -70,3 +70,33 @@
       ansible.builtin.import_role:
         name: nas
         tasks_from: prepare-create-complete.yml
+
+    - name: Проверить универсальный генератор плана HDD
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: plan.yml
+
+    - name: Проверить назначение роли по serial
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: plan-assign.yml
+
+    - name: Проверить независимое принятие существующих ext4/ZFS
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: adopt-storage.yml
+
+    - name: Проверить безопасную регистрацию существующих томов OMV
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: adopt-omv.yml
+
+    - name: Проверить однократную фиксацию проверенных томов в 910
+      ansible.builtin.import_role:
+        name: physical_storage
+        tasks_from: persist-adopted.yml
+
+    - name: Проверить согласованное первое создание пустых HDD
+      ansible.builtin.import_role:
+        name: nas
+        tasks_from: initialize-blank.yml
