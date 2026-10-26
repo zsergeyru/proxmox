@@ -23,11 +23,10 @@ properties:
   management:
     type: object
     additionalProperties: false
-    required: [driver]
+    required: [engine]
     properties:
-      driver:
-        type: string
-        pattern: '^[a-z][a-z0-9-]*$'
+      engine:
+        const: ansible
   connection:
     type: object
     additionalProperties: false
