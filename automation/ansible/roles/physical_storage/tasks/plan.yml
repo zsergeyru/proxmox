@@ -95,7 +95,16 @@
       - physical_plan_recovery_journal is mapping
       - physical_plan_recovery_journal.keys() | list | sort == ['fingerprint', 'items', 'state']
       - physical_plan_recovery_journal.state == 'started'
-      - physical_plan_recovery_journal.fingerprint is match('^[a-f0-9]{64}
+      - physical_plan_recovery_journal.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_plan_recovery_journal['items'] | length == 3
+      - physical_plan_recovery_journal['items'] | map(attribute='role') | list == ['shared', 'data', 'backup']
+      - physical_plan_recovery_journal['items'] | map(attribute='action') | list == ['create-ext4', 'create-zfs', 'create-zfs']
+      - physical_plan_recovery_journal['items'] | map(attribute='serial') | unique | list | length == 3
+    fail_msg: Старый журнал не является полным первоначальным планом NAS
+  when:
+    - not (physical_plan_previous.stat.exists | default(false))
+    - physical_plan_previous_journal.stat.exists | default(false)
+
 - name: Подготовить детерминированное распределение физических дисков
   ansible.builtin.set_fact:
     physical_plan_available: "{{ physical_actual_disks }}"
@@ -120,19 +129,19 @@
       - physical_plan_assignments[0].role == 'system'
     fail_msg: Невозможно подтвердить полное назначение накопителей
 
-- name: Сохранить первоначальный отпечаток до преобразования действий в preserve
+- name: Сохранить исходный fingerprint до изменения действий на preserve
   ansible.builtin.set_fact:
     physical_plan_original_fingerprint: >-
       {{ (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
 
-- name: Проверить завершённость ФС после прерывания без повторной записи
+- name: Допустить восстановление лишь при полном совпадении исходного плана
   ansible.builtin.assert:
     that:
       - physical_plan_layout_ready | bool
       - physical_plan_original_fingerprint == physical_plan_recovery_journal.fingerprint
       - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='serial') | list == physical_plan_recovery_journal['items'] | map(attribute='serial') | list
       - physical_plan_assignments | rejectattr('role', 'equalto', 'system') | map(attribute='action') | unique | list == ['recreate']
-    fail_msg: HDD не доказаны полностью подготовленными; повторный mkfs запрещён. Необходима ручная проверка
+    fail_msg: Разметка после сбоя не доказана полной; новая запись запрещена
   when:
     - not (physical_plan_previous.stat.exists | default(false))
     - physical_plan_previous_journal.stat.exists | default(false)
@@ -170,66 +179,5 @@
               and (physical_plan_previous_journal.stat.exists | default(false)))
           else none
         ),
-        'items': physical_plan_assignments
-      } | to_json }}
-)
-      - physical_plan_recovery_journal['items'] | length == 3
-      - physical_plan_recovery_journal['items'] | map(attribute='role') | list == ['shared', 'data', 'backup']
-      - physical_plan_recovery_journal['items'] | map(attribute='action') | list == ['create-ext4', 'create-zfs', 'create-zfs']
-      - physical_plan_recovery_journal['items'] | map(attribute='serial') | unique | list | length == 3
-    fail_msg: Старый журнал не является полным первоначальным планом NAS
-  when:
-    - not (physical_plan_previous.stat.exists | default(false))
-    - physical_plan_previous_journal.stat.exists | default(false)
-
-- name: Подготовить детерминированное распределение физических дисков
-  ansible.builtin.set_fact:
-    physical_plan_available: "{{ physical_actual_disks }}"
-    physical_plan_assignments: []
-    physical_plan_fingerprint_items: []
-    physical_plan_layout_ready: true
-
-- name: Назначить каждую роль только уникальному проверенному физическому диску
-  ansible.builtin.include_tasks: plan-assign.yml
-  loop: "{{ physical_storage.devices }}"
-  loop_control:
-    loop_var: declared_disk
-    label: "{{ declared_disk.role }}"
-
-- name: Запретить неопознанные диски, повторы или несовпадение назначения SSD
-  ansible.builtin.assert:
-    that:
-      - physical_plan_available | length == 0
-      - physical_plan_assignments | length == physical_storage.devices | length
-      - physical_plan_assignments | map(attribute='serial') | unique | list | length == physical_plan_assignments | length
-      - physical_plan_assignments | selectattr('role', 'equalto', 'system') | map(attribute='serial') | first == physical_plan_root.stdout | trim
-      - physical_plan_assignments[0].role == 'system'
-    fail_msg: Невозможно подтвердить полное назначение накопителей
-
-- name: Не пересоздавать уже правильно размеченные и проверяемые ext4/ZFS
-  ansible.builtin.set_fact:
-    physical_plan_assignments: >-
-      {{ physical_plan_assignments | map('combine', {'action': 'preserve'}) | list }}
-    physical_plan_fingerprint_items: >-
-      {{ physical_plan_fingerprint_items | map('combine', {'action': 'preserve'}) | list }}
-  when:
-    - not (physical_plan_previous.stat.exists | default(false))
-    - physical_plan_layout_ready | bool
-
-- name: Вычислить неизменный отпечаток физического плана
-  ansible.builtin.set_fact:
-    physical_plan_fingerprint: >-
-      {{ (physical_plan_fingerprint_items | to_json(sort_keys=True, separators=(',', ':'))) | hash('sha256') }}
-
-- name: Опубликовать план только через allowlisted stdout callback
-  ansible.builtin.debug:
-    msg: >-
-      PHYSICAL_STORAGE_PLAN_JSON={{ {
-        'host': physical_host_name,
-        'fingerprint': physical_plan_fingerprint,
-        'requires_creation': (
-          physical_plan_assignments | rejectattr('action', 'equalto', 'preserve') | list | length > 0
-        ),
-        'recovery_fingerprint': none,
         'items': physical_plan_assignments
       } | to_json }}
