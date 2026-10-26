@@ -141,8 +141,7 @@ def run_physical_host_operation(repo_root: Path, operation: str, name: str) -> i
                 or not re.fullmatch(r"[0-9a-f]{64}", confirmation["fingerprint"])):
             raise InfraManagerError("Отпечаток плана дисков не подтверждён")
         variables["physical_approved_fingerprint"] = confirmation["fingerprint"]
-        # PVE operator approval is a one-off transport flag, not a YAML choice.
-        variables["physical_disk_recreate_authorized"] = True
+        # This is an identity fingerprint only; it never authorizes disk writes.
     with PhysicalHostSshSession(host, pve_node) as session:
         if operation in {"deploy", "repair"}:
             for phase in host.phases:

@@ -211,7 +211,7 @@ def test_driverless_physical_operations_route_to_ansible() -> None:
         assert len(calls) == 1
         assert calls[0]["operation"] == "storage-prepare"
         assert calls[0]["variables"]["physical_approved_fingerprint"] == "a" * 64
-        assert calls[0]["variables"]["physical_disk_recreate_authorized"] is True
+        assert "physical_disk_recreate_authorized" not in calls[0]["variables"]
 
 
 def test_no_runtime_driver_or_service_specific_dispatch() -> None:
@@ -293,9 +293,22 @@ def test_generic_operator_services_derive_endpoints_from_yaml() -> None:
         assert forbidden not in source, forbidden
 
 
+def test_disk_approval_fingerprint_never_grants_recreate() -> None:
+    """Controller may pass a signed identity hash, not permission for disk writes."""
+    source = (
+        ROOT / "scripts/infra-manager/infra_manager/physical_host_operations.py"
+    ).read_text(encoding="utf-8")
+    assert 'variables["physical_approved_fingerprint"]' in source
+    assert '"physical_disk_recreate_authorized"' not in source
+    assert "prepare-" in (
+        ROOT / "automation/ansible/playbooks/prepare-nas-storage.yml"
+    ).read_text(encoding="utf-8")
+
+
 if __name__ == "__main__":
     test_generic_ansible_transport()
     test_generic_operator_services_derive_endpoints_from_yaml()
+    test_disk_approval_fingerprint_never_grants_recreate()
     test_native_disk_read_only_contract()
     test_driverless_physical_operations_route_to_ansible()
     test_driver_is_not_used_for_schema_or_inspect()

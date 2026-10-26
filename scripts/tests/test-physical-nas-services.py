@@ -178,6 +178,28 @@ def test_samba_service_automation() -> None:
     assert content.index("Назначить группе Samba полные права") < (
         content.index("Согласовать объекты OMV штатными средствами Ansible")
     )
+    smb_tasks = yaml.safe_load(content)
+    names = [t["name"] for t in smb_tasks]
+    def order(name: str) -> int:
+        return names.index(name)
+    assert order("Повторно подтвердить GUID data ZFS перед настройкой прав Samba") < (
+        order("Включить POSIX ACL существующего ZFS без форматирования")
+    )
+    assert order("Включить POSIX ACL существующего ZFS без форматирования") < (
+        order("Создать объявленные общие каталоги без удаления файлов")
+    )
+    assert order("Запретить публикацию Samba без действующих POSIX ACL") < (
+        order("Назначить группе Samba полные права и наследование для новых файлов")
+    )
+    acl_cmds = [t for t in smb_tasks if t.get("ansible.builtin.command", {}).get(
+        "argv", [None])[:2] == ["zfs", "set"]]
+    assert len(acl_cmds) == 1
+    assert acl_cmds[0]["ansible.builtin.command"]["argv"] == [
+        "zfs", "set", "acltype=posixacl", "{{ nas_data_pool }}"
+    ]
+    assert "nas_smb_zfs_acl_before.stdout" in acl_cmds[0]["when"]
+    assert "nas_smb_zfs_xattr.stdout" in content
+    assert "['dir', 'sa', 'on']" in content
 
 
 def test_samba_safe_error_hints() -> None:

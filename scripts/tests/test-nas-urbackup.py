@@ -491,6 +491,11 @@ def test_client_scoped_urbackup_archival_policy() -> None:
         task for task in tasks if "ansible.builtin.uri" in task
     ]
     assert len(urls) >= 7
+    client_poll = next(t for t in urls if t.get("register") == "nas_retention_clients_http")
+    assert client_poll["retries"] >= 10
+    assert client_poll["delay"] >= 3
+    assert "nas_backup_policy.local_client.name" in client_poll["until"]
+    assert client_poll["no_log"] is True
     assert all(
         task["ansible.builtin.uri"]["url"].startswith(
             "http://127.0.0.1:{{ nas_backup_policy.server.web_port }}/x?a="
@@ -527,6 +532,26 @@ def test_client_scoped_urbackup_archival_policy() -> None:
                for task in tasks)
     assert any("nas_retention_verified_archive" in str(task)
                for task in tasks)
+    normalization = next(
+        task for task in tasks
+        if "nas_retention_actual_parts" in task.get("ansible.builtin.set_fact", {})
+    )
+    assert "map('ansible.builtin.urldecode')" in (
+        normalization["ansible.builtin.set_fact"]["nas_retention_actual_parts"]
+    )
+    assert "map('ansible.builtin.urldecode')" in (
+        normalization["ansible.builtin.set_fact"]["nas_retention_desired_parts"]
+    )
+    final = next(
+        task for task in tasks
+        if task.get("name") == "Независимо подтвердить завершение изменения настроек хранения"
+    )
+    assert "map('ansible.builtin.urldecode')" in str(final)
+    # Same archive rule may arrive with percent-encoded or literal semicolons.
+    from urllib.parse import unquote_plus
+    rule_a = "window_c0=*%3B*%3B*%3B*"
+    rule_b = "window_c0=*;*;*;*"
+    assert unquote_plus(rule_a) == unquote_plus(rule_b)
     assert all("ansible.builtin.script" not in task and
                "ansible.builtin.shell" not in task for task in tasks)
 

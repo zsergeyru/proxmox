@@ -215,6 +215,16 @@
   register: nas_retention_clients_http
   changed_when: false
   no_log: true
+  retries: 12
+  delay: 5
+  until: >-
+    nas_retention_clients_http.status | default(0) == 200
+    and (nas_retention_clients_http.content | default('{}') | from_json).status is defined
+    and (
+      (nas_retention_clients_http.content | from_json).status
+      | selectattr('name', 'equalto', nas_backup_policy.local_client.name)
+      | list | length == 1
+    )
 
 - name: Найти только явно объявленный nas-local
   ansible.builtin.set_fact:
@@ -269,9 +279,11 @@
       {{ nas_retention_archive.value.split('&')
          | reject('equalto', '')
          | reject('match', '^(uuid_|next_archival_|timeleft_)')
+         | map('ansible.builtin.urldecode')
          | list | sort }}
     nas_retention_desired_parts: >-
-      {{ (nas_retention_desired_rules | urlencode).split('&') | sort }}
+      {{ (nas_retention_desired_rules | urlencode).split('&')
+         | map('ansible.builtin.urldecode') | list | sort }}
   no_log: true
 
 - name: Определить идемпотентность клиентского архива
@@ -350,6 +362,7 @@
         (nas_retention_verified_archive.value.split('&') |
          reject('equalto', '') |
          reject('match', '^(uuid_|next_archival_|timeleft_)') |
+         map('ansible.builtin.urldecode') |
          list | sort) == nas_retention_desired_parts
     fail_msg: UrBackup не подтвердил сохранённые правила nas-local
   no_log: true
