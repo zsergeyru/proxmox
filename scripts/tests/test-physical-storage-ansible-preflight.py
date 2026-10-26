@@ -21,6 +21,7 @@ def test_preflight_has_no_disk_writes() -> None:
         "ansible.builtin.assert", "ansible.builtin.stat",
         "ansible.builtin.command", "ansible.builtin.find",
         "ansible.builtin.set_fact", "ansible.builtin.debug",
+        "ansible.builtin.include_tasks",
     }
     commands = []
     for task in tasks:
@@ -42,6 +43,7 @@ def test_preflight_has_no_disk_writes() -> None:
                 assert command[1] == "--canonicalize-existing"
             commands.append(command[0])
     assert {"lsblk", "jq", "readlink", "wipefs", "blkid", "zpool"} <= set(commands)
+    assert tasks[-1]["ansible.builtin.include_tasks"] == "prepare-preserved-ext4.yml"
     text = path.read_text(encoding="utf-8")
     for term in (
         "physical_disk_intent.fingerprint",
