@@ -1,0 +1,222 @@
+---
+# Intentionally NOT wired to a public playbook or infra-manager operation.
+# Requires prepare-preflight.yml + prepare-journal.yml in ONE Ansible run.
+# Once the journal exists, NEVER rerun this role: recover must ONLY inspect
+# and register already-created filesystems, never reissue mkfs/zpool create.
+- name: Запретить вызов создания HDD без одноразового журнала
+  ansible.builtin.assert:
+    that:
+      - physical_preparation_journal_committed | default(false) | bool
+      - physical_preparation_by_id is mapping
+      - physical_disk_intent.mode == 'first-create'
+      - physical_disk_intent.host == physical_host_name
+      - physical_preparation_by_id.keys() | list | sort == physical_disk_intent['items'] | map(attribute='role') | list | sort
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'preserve') | list | length == 0
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
+      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
+    fail_msg: Ansible-подготовка поддерживает только три пустых HDD; existing ext4 не трогать
+
+- name: Проверить, что имена ZFS-пулов и каталоги не могут скрыть данные
+  ansible.builtin.assert:
+    that:
+      - item.pool is match('^[a-z][a-z0-9-]{2,60}$')
+      - item.pool not in ['rpool', 'bpool']
+      - item.device == item.id
+    fail_msg: Недопустимое объявление ZFS или системного раздела
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Проверить существующие каталоги будущих ZFS-пулов
+  ansible.builtin.stat:
+    path: "/{{ item.pool }}"
+    follow: false
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_zfs_dirs
+  loop_control:
+    label: "{{ item.pool }}"
+
+- name: Убедиться, что каталог пула не является файлом или ссылкой
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.islnk | default(false))
+      - not (item.stat.exists | default(false)) or (item.stat.isdir | default(false))
+    fail_msg: Каталог ZFS не пустой или содержит посторонний объект
+  loop: "{{ physical_preparation_zfs_dirs.results }}"
+  loop_control:
+    label: "{{ item.item.pool }}"
+
+- name: Прочитать содержимое имеющихся каталогов ZFS
+  ansible.builtin.find:
+    paths: "/{{ item.item.pool }}"
+    hidden: true
+    file_type: any
+    recurse: false
+  loop: "{{ physical_preparation_zfs_dirs.results }}"
+  when: item.stat.exists | default(false)
+  register: physical_preparation_zfs_content
+  loop_control:
+    label: "{{ item.item.pool }}"
+
+- name: Запретить скрывать чужие данные ZFS-монтированием
+  ansible.builtin.assert:
+    that:
+      - item is skipped or (item.matched | int == 0)
+    fail_msg: Точка подключения ZFS содержит данные; создание пула запрещено
+  loop: "{{ physical_preparation_zfs_content.results }}"
+  loop_control:
+    label: "{{ item.item.item.pool }}"
+
+- name: Запретить создание пула поверх существующего монтирования
+  ansible.builtin.command:
+    argv: [findmnt, --mountpoint, "/{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_existing_mount
+  changed_when: false
+  failed_when: false
+  loop_control:
+    label: "{{ item.pool }}"
+
+- name: Остановиться при занятой точке подключения или ошибке проверки
+  ansible.builtin.assert:
+    that:
+      - item.rc == 1
+    fail_msg: Монтирование ZFS уже существует либо его состояние неизвестно
+  loop: "{{ physical_preparation_existing_mount.results }}"
+  loop_control:
+    label: "{{ item.item.pool }}"
+
+# Every destructive command rechecks the exact by-id link in the SAME
+# one-shot run, independently from the initial disk discovery.
+- name: Ещё раз разрешить подтверждённые HDD перед первым изменением
+  ansible.builtin.command:
+    argv: [readlink, --canonicalize-existing, "{{ physical_preparation_by_id[item.role] }}"]
+  loop: "{{ physical_disk_intent['items'] }}"
+  register: physical_preparation_final_targets
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Отказать, если подтверждённый путь изменился перед записью
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim == (physical_preparation_disks | selectattr('serial', 'equalto', item.item.serial) | first).path
+    fail_msg: HDD подменён после подтверждения; повторное форматирование запрещено
+  loop: "{{ physical_preparation_final_targets.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Создать единственный GPT-раздел ext4 на заранее подтверждённом HDD
+  ansible.builtin.command:
+    argv:
+      - sgdisk
+      - --new=1:1MiB:0
+      - --typecode=1:8300
+      - --change-name=1:nas-shared
+      - "{{ physical_preparation_by_id[item.role] }}"
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  changed_when: true
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Дождаться обнаружения нового GPT-раздела
+  ansible.builtin.command:
+    argv: [udevadm, settle]
+  changed_when: false
+
+- name: Проверить, что новый раздел действительно существует
+  ansible.builtin.stat:
+    path: "{{ physical_preparation_by_id[item.role] }}-part1"
+    follow: true
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  register: physical_preparation_new_partition
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Не выполнять mkfs при отсутствии ожидаемого раздела
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+      - item.stat.isblk | default(false)
+    fail_msg: Нет нового блочного раздела ext4; журнал остаётся, повтор запрещён
+  loop: "{{ physical_preparation_new_partition.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Создать ext4 ТОЛЬКО на новом подтверждённом GPT-разделе
+  ansible.builtin.command:
+    argv:
+      - mkfs.ext4
+      - -L
+      - "nas-{{ item.role }}"
+      - "{{ physical_preparation_by_id[item.role] }}-part1"
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  changed_when: true
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Создать однодисковые ZFS-пулы на подтверждённых пустых HDD
+  ansible.builtin.command:
+    argv:
+      - zpool
+      - create
+      - -o
+      - ashift=12
+      - -O
+      - compression=lz4
+      - -O
+      - atime=off
+      - -m
+      - "/{{ volume[0].pool }}"
+      - "{{ volume[0].pool }}"
+      - "{{ physical_preparation_by_id[item.role] }}"
+  vars:
+    volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  changed_when: true
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Прочитать созданный UUID ext4 без изменения раздела
+  ansible.builtin.command:
+    argv:
+      - blkid
+      - -s
+      - UUID
+      - -o
+      - value
+      - "{{ physical_preparation_by_id[item.role] }}-part1"
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  register: physical_preparation_created_ext4
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить корректный UUID нового ext4
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim is match('^[0-9a-fA-F-]{16,40}$')
+    fail_msg: Не подтверждён UUID ext4; журнал сохраняется, повтор записи запрещён
+  loop: "{{ physical_preparation_created_ext4.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Прочитать неизменные GUID созданных ZFS-пулов
+  ansible.builtin.command:
+    argv: [zpool, get, -H, -o, value, guid, "{{ volume[0].pool }}"]
+  vars:
+    volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
+  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  register: physical_preparation_created_guids
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Подтвердить GUID каждого нового ZFS-пула
+  ansible.builtin.assert:
+    that:
+      - item.stdout | trim is match('^[0-9]{1,20}$')
+    fail_msg: Отсутствует GUID созданного ZFS; журнал сохраняется
+  loop: "{{ physical_preparation_created_guids.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
