@@ -44,6 +44,55 @@
       - not (physical_preparation_directory.stat.islnk | default(false))
       - not (physical_preparation_directory.stat.exists | default(false)) or (physical_preparation_directory.stat.isdir | default(false))
       - not (physical_preparation_directory.stat.exists | default(false)) or (physical_preparation_directory.stat.pw_name == 'root')
+      - not (physical_preparation_directory.stat.exists | default(false)) or (physical_preparation_directory.stat.mode is match('^0[0-7][0145][0145]    fail_msg: Неподтверждённый каталог состояния NAS; подготовка запрещена
+
+- name: Создать отсутствующий каталог журнала с закрытыми правами
+  ansible.builtin.file:
+    path: /etc/nas-apps
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: not (physical_preparation_directory.stat.exists | default(false))
+
+- name: Однократно записать журнал ДО любых команд разметки
+  ansible.builtin.copy:
+    dest: /etc/nas-apps/storage-preparation.json
+    content: "{{ {'fingerprint': physical_disk_intent.fingerprint, 'items': physical_disk_intent['items'], 'state': 'started'} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+    follow: false
+    unsafe_writes: false
+  register: physical_preparation_journal_written
+  no_log: true
+
+- name: Требовать фактическое создание нового журнала
+  ansible.builtin.assert:
+    that:
+      - physical_preparation_journal_written is changed
+    fail_msg: Старый журнал уже существует; разметка и форматирование запрещены
+
+- name: Прочитать журнал после однократной записи
+  ansible.builtin.slurp:
+    src: /etc/nas-apps/storage-preparation.json
+  register: physical_preparation_written_document
+  no_log: true
+
+- name: Проверить неизменность подтверждённого плана на носителе
+  ansible.builtin.assert:
+    that:
+      - (physical_preparation_written_document.content | b64decode | from_json).fingerprint == physical_disk_intent.fingerprint
+      - (physical_preparation_written_document.content | b64decode | from_json)['items'] == physical_disk_intent['items']
+      - (physical_preparation_written_document.content | b64decode | from_json).state == 'started'
+    fail_msg: Журнал не соответствует подтверждённому плану, запись HDD запрещена
+  no_log: true
+
+- name: Разрешить только текущей Ansible-сессии продолжить подготовку
+  ansible.builtin.set_fact:
+    physical_preparation_journal_committed: true
+))
     fail_msg: Неподтверждённый каталог состояния NAS; подготовка запрещена
 
 - name: Создать отсутствующий каталог журнала с закрытыми правами
