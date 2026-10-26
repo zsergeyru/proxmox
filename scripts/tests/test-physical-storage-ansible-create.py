@@ -315,6 +315,33 @@ def test_omv_fstab_stage_guards_existing_data() -> None:
         assert "prepare-omv-activate.yml" not in candidate.read_text(), candidate
 
 
+def test_observed_identity_includes_system_disk_without_writes() -> None:
+    """Controller state is derived from live hardware, never from guessed /dev/sdX."""
+    path = ROOT / "automation/ansible/roles/nas/tasks/prepare-observed-identity.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(tasks, list) and len(tasks) >= 7
+    source = path.read_text(encoding="utf-8")
+    assert "physical_recovery_disk_tree.stdout" in source
+    assert "physical_observed_system_serial" in source
+    assert "selectattr('serial', 'equalto', observed_serial)" in source
+    assert "physical_observed_devices" in source
+    assert "physical_observed_storage" in source
+    assert "plan_fingerprint" in source
+    assert "nas_omv_verified_volumes" in source
+    for task in tasks:
+        assert not any(key in task for key in (
+            "ansible.builtin.shell", "ansible.builtin.raw",
+            "ansible.builtin.script", "ansible.builtin.copy",
+            "ansible.builtin.file", "ansible.builtin.mount",
+        )), task.get("name")
+        if "ansible.builtin.command" in task:
+            argv = task["ansible.builtin.command"]["argv"]
+            assert argv[:4] == ["jq", "-e", "-r", argv[3]]
+            assert task.get("changed_when") is False
+    for candidate in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
+        assert "prepare-observed-identity.yml" not in candidate.read_text(), candidate
+
+
 def read_omv_register() -> list:
     name = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
     content = yaml.safe_load(name.read_text(encoding="utf-8"))
@@ -346,4 +373,5 @@ if __name__ == "__main__":
     test_omv_native_registration_is_safe_and_disconnected()
     test_omv_post_registration_verification_is_read_only()
     test_omv_fstab_stage_guards_existing_data()
+    test_observed_identity_includes_system_disk_without_writes()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
