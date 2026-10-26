@@ -4,18 +4,18 @@
 - name: Требовать режим восстановления из подтверждённого прежнего плана
   ansible.builtin.assert:
     that:
-      - physical_disk_intent is defined
-      - physical_disk_intent is mapping
-      - physical_disk_intent.keys() | list | sort == ['fingerprint', 'host', 'items', 'mode', 'schema_version']
-      - physical_disk_intent.schema_version == 1
-      - physical_disk_intent.host == physical_host_name
-      - physical_disk_intent.mode == 'recover'
-      - physical_disk_intent.fingerprint is match('^[a-f0-9]{64}$')
-      - physical_disk_intent['items'] | length == 3
-      - physical_disk_intent['items'] | map(attribute='role') | list | sort == ['backup', 'data', 'shared']
-      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
-      - physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
-      - physical_disk_intent['items'] | map(attribute='serial') | unique | list | length == 3
+      - physical_recovery_intent is defined
+      - physical_recovery_intent is mapping
+      - physical_recovery_intent.keys() | list | sort == ['fingerprint', 'host', 'items', 'mode', 'schema_version']
+      - physical_recovery_intent.schema_version == 1
+      - physical_recovery_intent.host == physical_host_name
+      - physical_recovery_intent.mode == 'recover'
+      - physical_recovery_intent.fingerprint is match('^[a-f0-9]{64}$')
+      - physical_recovery_intent['items'] | length == 3
+      - physical_recovery_intent['items'] | map(attribute='role') | list | sort == ['backup', 'data', 'shared']
+      - physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list | length == 1
+      - physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list | length == 2
+      - physical_recovery_intent['items'] | map(attribute='serial') | unique | list | length == 3
       - physical_storage.policies.existing_data == 'preserve'
       - physical_storage.policies.unverified_devices == 'reject_writes'
     fail_msg: Нет однозначного подтверждённого плана восстановления HDD
@@ -52,8 +52,8 @@
       - physical_recovery_journal is mapping
       - physical_recovery_journal.keys() | list | sort == ['fingerprint', 'items', 'state']
       - physical_recovery_journal.state == 'started'
-      - physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint
-      - physical_recovery_journal['items'] == physical_disk_intent['items']
+      - physical_recovery_journal.fingerprint == physical_recovery_intent.fingerprint
+      - physical_recovery_journal['items'] == physical_recovery_intent['items']
     fail_msg: Журнал HDD не соответствует разрешённому восстановлению
   no_log: true
 
@@ -93,7 +93,7 @@
   vars:
     actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
     expected: "{{ physical_storage.devices | selectattr('role', 'equalto', item.role) | list }}"
-  loop: "{{ physical_disk_intent['items'] }}"
+  loop: "{{ physical_recovery_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -108,7 +108,7 @@
       - '[.blockdevices[] | select(.type=="disk" and .serial==$serial) | select(any(.. | objects | .mountpoints? | arrays | .[]; . == "/"))] | length == 0'
     stdin: "{{ physical_recovery_disk_tree.stdout }}"
     stdin_add_newline: false
-  loop: "{{ physical_disk_intent['items'] }}"
+  loop: "{{ physical_recovery_intent['items'] }}"
   loop_control:
     label: "{{ item.role }}"
   changed_when: false
@@ -125,7 +125,7 @@
     fail_msg: HDD {{ item.role }} не имеет подтверждённого ext4-раздела
   vars:
     actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
-  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
   loop_control:
     label: "{{ item.role }}"
 
@@ -135,7 +135,7 @@
   vars:
     actual: "{{ physical_recovery_disks | selectattr('serial', 'equalto', item.serial) | list }}"
     filesystem: "{{ actual[0].children[0] }}"
-  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-ext4') | list }}"
   register: physical_recovery_ext4
   changed_when: false
   loop_control:
@@ -157,7 +157,7 @@
     argv: [zpool, status, -P, "{{ volume[0].pool }}"]
   vars:
     volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
-  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
   register: physical_recovery_zpool_status
   changed_when: false
   loop_control:
@@ -181,7 +181,7 @@
     argv: [zpool, get, -H, -o, value, guid, "{{ volume[0].pool }}"]
   vars:
     volume: "{{ physical_storage.volumes | selectattr('id', 'equalto', item.role) | list }}"
-  loop: "{{ physical_disk_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
+  loop: "{{ physical_recovery_intent['items'] | selectattr('action', 'equalto', 'create-zfs') | list }}"
   register: physical_recovery_guids
   changed_when: false
   loop_control:
