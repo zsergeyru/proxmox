@@ -295,7 +295,7 @@ def test_permanent_docker_client_contract():
     ).read_text()
     assert "RequiresMountsFor=" in client_unit
     assert "nas-urbackup-safe preflight" in client_unit
-    assert "nas-urbackup-client-mount check" in client_unit
+    assert "ExecStartPre=/usr/local/sbin/nas-urbackup-client-mount prepare" in client_unit  # after reboot too
     assert "nas-urbackup.service" in client_unit
     assert "BindsTo=nas-urbackup.service" in client_unit
     assert "nas-urbackup-client.service" in (
