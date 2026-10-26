@@ -59,7 +59,7 @@
         nas_backup_guid: "{{ nas_confirmed_state.volumes.backup.pool_guid }}"
         nas_backup_mountpoint: "{{ nas_confirmed_state.volumes.backup.mountpoint }}"
         nas_urbackup_client_name: "{{ nas_backup_policy.local_client.name }}"
-        nas_access_policy: "{{ nas_deployment_access | combine({'users': nas_global_accounts.users | map(attribute='name') | list}) }}"
+        nas_access_policy: "{{ nas_deployment_access | combine({'users': nas_global_accounts.users}) }}"
       when: nas_deploy_phase == 'services'
   roles:
     - role: nas
