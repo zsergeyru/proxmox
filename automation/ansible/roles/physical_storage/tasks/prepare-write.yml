@@ -106,6 +106,66 @@
   loop_control:
     label: "{{ item.item.role }}"
 
+- name: Повторить поиск любых сигнатур непосредственно перед записью
+  ansible.builtin.command:
+    argv: [wipefs, --no-act, "{{ physical_preparation_by_id[item.role] }}"]
+  loop: "{{ physical_disk_intent['items'] }}"
+  register: physical_preparation_final_wipefs
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Запретить любую запись, если на HDD появилась новая сигнатура
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == ''
+    fail_msg: HDD изменился после подтверждения; журнал сохранён, форматирование запрещено
+  loop: "{{ physical_preparation_final_wipefs.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Независимо выполнить последнюю проверку пустоты blkid
+  ansible.builtin.command:
+    argv: [blkid, -p, "{{ physical_preparation_by_id[item.role] }}"]
+  loop: "{{ physical_disk_intent['items'] }}"
+  register: physical_preparation_final_blkid
+  failed_when: false
+  changed_when: false
+  loop_control:
+    label: "{{ item.role }}"
+
+- name: Отказать при любых новых сигнатурах или ошибках blkid
+  ansible.builtin.assert:
+    that:
+      - item.rc == 2
+      - item.stdout | trim == ''
+    fail_msg: HDD уже не доказан пустым; разметка запрещена
+  loop: "{{ physical_preparation_final_blkid.results }}"
+  loop_control:
+    label: "{{ item.item.role }}"
+
+- name: Повторно проверить, что имя нового ZFS-пула не занято
+  ansible.builtin.command:
+    argv: [zpool, list, -H, -o, name, "{{ item.pool }}"]
+  loop: "{{ physical_storage.volumes | selectattr('kind', 'equalto', 'zfs_pool') | list }}"
+  register: physical_preparation_final_zpool_names
+  failed_when: false
+  changed_when: false
+  loop_control:
+    label: "{{ item.pool }}"
+
+- name: Отказать при конфликте пулов непосредственно перед записью
+  ansible.builtin.assert:
+    that:
+      - item.rc == 1
+      - item.stdout | trim == ''
+      - "'no such pool' in (item.stderr | lower)"
+    fail_msg: Название будущего пула занято либо ZFS вернул неожиданную ошибку
+  loop: "{{ physical_preparation_final_zpool_names.results }}"
+  loop_control:
+    label: "{{ item.item.pool }}"
+
 - name: Создать единственный GPT-раздел ext4 на заранее подтверждённом HDD
   ansible.builtin.command:
     argv:
