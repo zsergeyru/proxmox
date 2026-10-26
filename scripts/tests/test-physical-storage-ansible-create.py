@@ -145,6 +145,45 @@ def test_recovery_is_strictly_read_only() -> None:
     assert "tasks_from: prepare-recover-inspect.yml" in entry.read_text(encoding="utf-8")
 
 
+def test_omv_recovery_audit_is_read_only() -> None:
+    audit = yaml.safe_load(
+        (ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-audit.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert isinstance(audit, list) and len(audit) >= 7
+    for task in audit:
+        modules = [key for key in task if key.startswith("ansible.builtin.")]
+        assert len(modules) == 1, task.get("name")
+        assert modules[0] in {
+            "ansible.builtin.assert", "ansible.builtin.set_fact",
+            "ansible.builtin.command", "ansible.builtin.debug",
+        }, task.get("name")
+        if "ansible.builtin.command" in task:
+            assert task.get("changed_when") is False
+            assert task["ansible.builtin.command"]["argv"] == [
+                "omv-confdbadm", "read", "conf.system.filesystem.mountpoint",
+            ]
+    assert "nas_omv_existing_mounts" in str(audit)
+    assert "by_directory" in str(audit)
+    assert "by_source" in str(audit)
+    assert "physical_recovery_journal.fingerprint == physical_disk_intent.fingerprint" in str(audit)
+    playbook = yaml.safe_load(
+        (ROOT / "automation/ansible/playbooks/inspect-nas-storage-recovery.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert len(playbook[0]["tasks"]) == 2
+    assert [
+        task["ansible.builtin.include_role"]["tasks_from"]
+        for task in playbook[0]["tasks"]
+    ] == ["prepare-recover-inspect.yml", "prepare-omv-audit.yml"]
+    assert [
+        task["ansible.builtin.include_role"]["name"]
+        for task in playbook[0]["tasks"]
+    ] == ["physical_storage", "nas"]
+
+
 def test_item_key_never_collides_with_dict_method() -> None:
     preflight = read("prepare-preflight.yml")
     journal = read("prepare-journal.yml")
@@ -165,4 +204,5 @@ if __name__ == "__main__":
     test_item_key_never_collides_with_dict_method()
     test_preserved_ext4_is_checked_without_writes()
     test_recovery_is_strictly_read_only()
+    test_omv_recovery_audit_is_read_only()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
