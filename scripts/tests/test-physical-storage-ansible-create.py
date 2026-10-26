@@ -342,6 +342,52 @@ def test_observed_identity_includes_system_disk_without_writes() -> None:
         assert "prepare-observed-identity.yml" not in candidate.read_text(), candidate
 
 
+def test_generic_observed_state_persistence_is_one_shot() -> None:
+    """No state overwrite, no symlinks, no disk writes and no NAS code in 910."""
+    path = ROLE / "persist-verified.yml"
+    tasks = read("persist-verified.yml")
+    source = path.read_text(encoding="utf-8")
+    assert "physical_storage_state_commit_authorized" in source
+    assert "physical_state_ssh_identity.fingerprint" in source
+    assert "physical_state_ssh_identity.address == ansible_host" in source
+    assert "physical_observed_storage.plan_fingerprint == physical_disk_intent.fingerprint" in source
+    assert "physical_state_legacy_file" in source
+    assert "physical_state_existing_bytes.content | b64decode | from_json" in source
+    assert "physical_storage_state_document" in source
+    assert "physical_state_verified_bytes.content | b64decode | from_json" in source
+    copies = [t for t in tasks if "ansible.builtin.copy" in t]
+    assert len(copies) == 1
+    writer = copies[0]
+    payload = writer["ansible.builtin.copy"]
+    assert payload["force"] is False
+    assert payload["follow"] is False
+    assert payload["unsafe_writes"] is False
+    assert payload["mode"] == "0600"
+    assert writer["delegate_to"] == "localhost"
+    assert writer["become"] is False
+    assert writer["no_log"] is True
+    assert writer["when"] == (
+        "not (physical_state_existing_file.stat.exists | default(false))"
+    )
+    assert payload["dest"].endswith("-storage.json")
+    assert "physical_storage_state_document | to_nice_json" in payload["content"]
+    for task in tasks:
+        modules = [k for k in task if k.startswith("ansible.builtin.")]
+        assert len(modules) == 1
+        assert modules[0] in {
+            "ansible.builtin.assert", "ansible.builtin.stat",
+            "ansible.builtin.slurp", "ansible.builtin.set_fact",
+            "ansible.builtin.copy",
+        }, task.get("name")
+    for candidate in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
+        assert "persist-verified.yml" not in candidate.read_text(), candidate
+    for candidate in (ROOT / "automation/ansible/roles").rglob("*.yml"):
+        if candidate == path:
+            continue
+        assert "tasks_from: persist-verified.yml" not in candidate.read_text(), candidate
+        assert "include_tasks: persist-verified.yml" not in candidate.read_text(), candidate
+
+
 def read_omv_register() -> list:
     name = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-register.yml"
     content = yaml.safe_load(name.read_text(encoding="utf-8"))
@@ -374,4 +420,5 @@ if __name__ == "__main__":
     test_omv_post_registration_verification_is_read_only()
     test_omv_fstab_stage_guards_existing_data()
     test_observed_identity_includes_system_disk_without_writes()
+    test_generic_observed_state_persistence_is_one_shot()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
