@@ -128,8 +128,61 @@ def test_preflight_runs_before_legacy_writer() -> None:
     assert "prepare-physical-storage-preflight.yml" in universal
 
 
+def test_recovery_inspector_cannot_format_hdds() -> None:
+    """Interrupted deployment is inspected, never retried with new mkfs."""
+    recovery = ANSIBLE / "roles/physical_storage/tasks/prepare-recover-inspect.yml"
+    tasks = yaml.safe_load(recovery.read_text(encoding="utf-8"))
+    assert isinstance(tasks, list) and len(tasks) > 12
+    permitted = {
+        "ansible.builtin.assert",
+        "ansible.builtin.stat",
+        "ansible.builtin.slurp",
+        "ansible.builtin.set_fact",
+        "ansible.builtin.command",
+        "ansible.builtin.debug",
+    }
+    commands = []
+    for item in tasks:
+        modules = [key for key in item if key.startswith("ansible.builtin.")]
+        assert len(modules) == 1, item.get("name")
+        assert modules[0] in permitted, item.get("name")
+        if modules[0] == "ansible.builtin.command":
+            assert item.get("changed_when") is False, item.get("name")
+            args = item[modules[0]]["argv"]
+            assert args[0] in {"lsblk", "jq", "blkid", "zpool"}, args
+            if args[0] == "zpool":
+                assert args[1] in {"status", "get"}, args
+            if args[0] == "blkid":
+                assert args[1:3] == ["-s", "UUID"], args
+            commands.append(args[0])
+    assert {"lsblk", "jq", "blkid", "zpool"} <= set(commands)
+    content = recovery.read_text(encoding="utf-8")
+    assert "physical_recovery_journal.state == 'started'" in content
+    assert "physical_recovery_journal['items'] == physical_disk_intent['items']" in content
+    assert "physical_disk_intent.mode == 'recover'" in content
+    playbook = yaml.safe_load(
+        (ANSIBLE / "playbooks/inspect-physical-storage-recovery.yml").read_text()
+    )
+    assert playbook[0]["gather_facts"] is False
+    assert len(playbook[0]["tasks"]) == 1
+    assert playbook[0]["tasks"][0]["ansible.builtin.include_role"] == {
+        "name": "physical_storage",
+        "tasks_from": "prepare-recover-inspect.yml",
+    }
+    source = (
+        ROOT / "scripts/infra-manager/infra_manager/physical_nas_storage_prepare.py"
+    ).read_text(encoding="utf-8")
+    assert 'if pending is not None and all(' in source
+    assert 'operation="recover-inspect"' in source
+    assert source.index('operation="recover-inspect"') < (
+        source.index('"python3 /usr/local/sbin/nas-storage-prepare"')
+    )
+    assert '" recover" if pending is not None else ""' in source
+
+
 if __name__ == "__main__":
     test_preflight_has_no_disk_writes()
     test_jq_refuses_system_disk()
     test_preflight_runs_before_legacy_writer()
+    test_recovery_inspector_cannot_format_hdds()
     print("[ОК] Ansible HDD preparation preflight is read-only and fail-closed")
