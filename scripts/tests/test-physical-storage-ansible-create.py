@@ -128,10 +128,16 @@ def test_recovery_is_strictly_read_only() -> None:
     # must remain disconnected from recovery and normal deployment.
     for p in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
         source = p.read_text(encoding="utf-8")
-        if "prepare-recover-inspect.yml" in source:
+        document = yaml.safe_load(source)
+        active = [
+            task.get("ansible.builtin.include_role", {}).get("tasks_from")
+            for play in document if isinstance(play, dict)
+            for task in play.get("tasks", []) if isinstance(task, dict)
+        ]
+        assert "prepare-write.yml" not in active, p
+        assert "prepare-journal.yml" not in active, p
+        if "prepare-recover-inspect.yml" in active:
             assert p.name == "inspect-physical-storage-recovery.yml", p
-            assert "prepare-write.yml" not in source, p
-            assert "prepare-journal.yml" not in source, p
     entry = (ROOT / "automation/ansible/playbooks/inspect-physical-storage-recovery.yml")
     assert "tasks_from: prepare-recover-inspect.yml" in entry.read_text(encoding="utf-8")
 
