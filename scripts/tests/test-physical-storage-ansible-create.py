@@ -275,7 +275,44 @@ def test_omv_post_registration_verification_is_read_only() -> None:
             if candidate == path:
                 continue
             doc = candidate.read_text(encoding="utf-8")
+            if candidate.name == "prepare-omv-activate.yml":
+                assert "include_tasks: prepare-omv-verify.yml" in doc
+                continue
             assert "tasks_from: prepare-omv-verify.yml" not in doc, candidate
+            assert "include_tasks: prepare-omv-verify.yml" not in doc, candidate
+
+
+def test_omv_fstab_stage_guards_existing_data() -> None:
+    """A future OMV activation must not mount over unknown filesystem data."""
+    path = ROOT / "automation/ansible/roles/nas/tasks/prepare-omv-activate.yml"
+    tasks = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(tasks, list) and len(tasks) >= 10
+    source = path.read_text(encoding="utf-8")
+    assert "nas_omv_registration_authorized" in source
+    assert "physical_recovery_journal.fingerprint" in source
+    assert "nas_omv_activate_ext4_directory" in source
+    assert "nas_omv_activate_ext4_contents" in source
+    assert "nas_omv_activate_declared_ext4" in source
+    assert "nas_omv_expected_mounts[0].fsname" in source
+    assert "prepare-omv-verify.yml" in source
+    for item in tasks:
+        assert not any(key in item for key in (
+            "ansible.builtin.shell", "ansible.builtin.raw",
+            "ansible.builtin.script", "ansible.builtin.copy",
+            "ansible.builtin.mount", "ansible.builtin.file",
+        )), item.get("name")
+        if "ansible.builtin.command" in item:
+            argv = item["ansible.builtin.command"]["argv"]
+            assert argv[0] in {"findmnt", "omv-salt", "mount"}
+            if argv[0] == "omv-salt":
+                assert argv == ["omv-salt", "deploy", "run", "fstab"]
+                assert item["no_log"] is True
+                assert item["when"]
+            if argv[0] == "mount":
+                assert item["when"] == "nas_omv_activate_ext4_after.rc == 1"
+            assert "changed_when" in item
+    for candidate in (ROOT / "automation/ansible/playbooks").glob("*.yml"):
+        assert "prepare-omv-activate.yml" not in candidate.read_text(), candidate
 
 
 def read_omv_register() -> list:
@@ -308,4 +345,5 @@ if __name__ == "__main__":
     test_omv_recovery_audit_is_read_only()
     test_omv_native_registration_is_safe_and_disconnected()
     test_omv_post_registration_verification_is_read_only()
+    test_omv_fstab_stage_guards_existing_data()
     print("[ОК] Ansible one-shot journal and isolated first-create stage")
