@@ -26,6 +26,8 @@ class PhysicalHost:
     user: str
     ssh_host_fingerprint: str | None
     engine: str
+    phases: tuple[str, ...]
+    callback: str | None
     devices: tuple[dict[str, object], ...]
     directory: Path
     volumes: dict[str, dict[str, object]] | None = None
@@ -96,6 +98,8 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
     # систему и связь с ней. Не поддерживать конкурирующий источник данных.
     storage = load_physical_storage(repo_root, name)
     engine = data["management"]["engine"]
+    phases = tuple(data["management"]["phases"])
+    callback = data["management"]["callback"]
     # Generic storage safety is independent of any dynamically loaded driver.
     # The Ansible role will additionally verify the actual hardware/UUIDs.
     _validate_physical_layout(storage)
@@ -136,6 +140,8 @@ def load_physical_host(repo_root: Path, name: str) -> PhysicalHost:
         user=conn["user"],
         ssh_host_fingerprint=conn["ssh_host_fingerprint"],
         engine=engine,
+        phases=phases,
+        callback=callback,
         devices=devices,
         directory=directory,
         volumes=volumes,
