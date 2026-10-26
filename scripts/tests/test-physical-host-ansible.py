@@ -170,7 +170,7 @@ def test_driver_is_not_used_for_schema_or_inspect() -> None:
     assert "_validate_physical_layout(storage)" in parser
     assert "validate_driver_storage" not in parser
     assert 'if operation == "inspect":' not in controller
-    assert '"inspect"' not in controller.split("SUPPORTED_HOST_OPERATIONS =", 1)[1].split("\\n", 1)[0]
+    assert '"inspect"' not in controller.split("SUPPORTED_HOST_OPERATIONS =", 1)[1].splitlines()[0]
     assert "physical_nas" not in controller
     assert "omv8" not in controller
 
